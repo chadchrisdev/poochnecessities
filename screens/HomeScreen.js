@@ -1,21 +1,226 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   ScrollView, 
   TouchableOpacity, 
-  Image, 
   StyleSheet, 
   SafeAreaView,
-  StatusBar 
+  StatusBar,
+  ActivityIndicator,
+  Image
 } from 'react-native';
 import { FontAwesome5, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { supabase } from '../src/lib/supabase';
+import { useAuth } from '../src/context/AuthContext';
+import UserAvatar from '../src/components/UserAvatar';
+import { format } from 'date-fns';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
+  const { user } = useAuth();
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [dogs, setDogs] = useState([]);
+  const [dogsLoading, setDogsLoading] = useState(true);
+  const [activities, setActivities] = useState([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [upcomingActivities, setUpcomingActivities] = useState([]);
+  const [upcomingActivitiesLoading, setUpcomingActivitiesLoading] = useState(true);
   
+  // Function to get the appropriate greeting based on time of day
+  const getTimeBasedGreeting = () => {
+    const currentHour = new Date().getHours();
+    
+    if (currentHour < 12) {
+      return 'Good Morning';
+    } else if (currentHour < 18) {
+      return 'Good Afternoon';
+    } else {
+      return 'Good Evening';
+    }
+  };
+  
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+        
+        const { data, error } = await supabase
+          .from('users')
+          .select('full_name, avatar_url')
+          .eq('id', user.id)
+          .single();
+          
+        if (error) throw error;
+        setProfile(data);
+      } catch (error) {
+        console.warn('Error fetching user profile:', error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchUserProfile();
+  }, [user]);
+
+  // Fetch user's dogs from Supabase
+  const fetchDogs = async () => {
+    try {
+      setDogsLoading(true);
+      
+      if (!user) {
+        return;
+      }
+      
+      const { data, error } = await supabase
+        .from('dogs')
+        .select('*')
+        .order('name');
+        
+      if (error) {
+        console.error('Error fetching dogs:', error);
+        return;
+      }
+      
+      setDogs(data || []);
+    } catch (error) {
+      console.error('Unexpected error fetching dogs:', error);
+    } finally {
+      setDogsLoading(false);
+    }
+  };
+  
+  // Fetch recent activities from Supabase for today
+  const fetchRecentActivities = async () => {
+    try {
+      setActivitiesLoading(true);
+      
+      if (!user) {
+        return;
+      }
+      
+      // Get today's date at midnight
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const { data, error } = await supabase
+        .from('activities')
+        .select(`
+          *,
+          dogs(id, name, photo_url)
+        `)
+        .gte('start_time', today.toISOString())
+        .order('start_time', { ascending: false })
+        .limit(5);
+        
+      if (error) {
+        console.error('Error fetching activities:', error);
+        return;
+      }
+      
+      // Process data to transform it for UI
+      const processedActivities = (data || []).map(activity => {
+        let dogName = 'Unknown Dog';
+        let dogPhoto = null;
+        
+        if (activity.dogs) {
+          dogName = activity.dogs.name || 'Unknown Dog';
+          dogPhoto = activity.dogs.photo_url;
+        }
+        
+        return {
+          ...activity,
+          dog_name: dogName,
+          dog_photo: dogPhoto
+        };
+      });
+      
+      setActivities(processedActivities);
+    } catch (error) {
+      console.error('Unexpected error fetching activities:', error);
+    } finally {
+      setActivitiesLoading(false);
+    }
+  };
+  
+  // Load data when component mounts or user changes
+  useEffect(() => {
+    if (user) {
+      fetchDogs();
+      fetchRecentActivities();
+    }
+  }, [user]);
+  
+  // Format time for display (e.g., "8:30 AM • 25 mins")
+  const formatActivityTime = (startTime, duration) => {
+    try {
+      const date = new Date(startTime);
+      let formattedTime = format(date, 'h:mm a');
+      
+      if (duration) {
+        formattedTime += ` • ${duration} mins`;
+      }
+      
+      return formattedTime;
+    } catch (error) {
+      console.error('Error formatting time:', error);
+      return 'Unknown time';
+    }
+  };
+  
+  // Get the appropriate emoji and background color for activity type
+  const getActivityIconInfo = (activityType) => {
+    switch(activityType?.toLowerCase()) {
+      case 'walk':
+        return { emoji: '🐾', bgColor: '#F3E8FF' };
+      case 'feeding':
+      case 'feed':
+        return { emoji: '🍽️', bgColor: '#DBEAFE' };
+      case 'play':
+        return { emoji: '🎾', bgColor: '#D1FAE5' };
+      case 'pee':
+        return { emoji: '💧', bgColor: '#FEF3C7' };
+      case 'poop':
+        return { emoji: '💩', bgColor: '#FEE2E2' };
+      case 'medication':
+      case 'meds':
+        return { emoji: '💊', bgColor: '#FCE7F3' };
+      default:
+        return { emoji: '🐶', bgColor: '#F3F4F6' };
+    }
+  };
+  
+  // Get a readable title for the activity
+  const getActivityTitle = (activity) => {
+    const type = activity.activity_type?.toLowerCase();
+    
+    switch(type) {
+      case 'walk':
+        return 'Walk';
+      case 'feeding':
+      case 'feed':
+        return 'Feeding';
+      case 'play':
+        return 'Play Time';
+      case 'pee':
+        return 'Potty Break (Pee)';
+      case 'poop':
+        return 'Potty Break (Poop)';
+      case 'medication':
+      case 'meds':
+        return 'Medication';
+      default:
+        // Capitalize the first letter
+        return type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Activity';
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -27,236 +232,223 @@ const HomeScreen = () => {
         </View>
       </View>
 
-      <ScrollView style={styles.scrollView}>
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          <View style={styles.heroContent}>
-            <Image 
-              source={{ uri: 'https://storage.googleapis.com/uxpilot-auth.appspot.com/4448cecd1a-a0473bdbb6739fbad579.png' }} 
-              style={styles.profileImage} 
-            />
-            <View>
-              <Text style={styles.greeting}>Good Morning, Sarah!</Text>
-              <Text style={styles.dogStatus}>Lucy-Loo is doing great today! 🐾</Text>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#8B5CF6" />
+        </View>
+      ) : (
+        <ScrollView style={styles.scrollView}>
+          {/* Hero Section */}
+          <View style={styles.heroSection}>
+            <View style={styles.heroContent}>
+              <UserAvatar 
+                avatarUrl={profile?.avatar_url}
+                size={60}
+                onPress={() => navigation.navigate('ProfileTab')}
+                style={{ marginRight: 16 }}
+                userName={profile?.full_name || ''}
+                avatarType={profile?.avatar_url ? 'uploaded' : 'initial'}
+              />
+              <View>
+                <Text style={styles.greeting}>
+                  {getTimeBasedGreeting()}, {profile?.full_name ? profile.full_name.split(' ')[0] : 'Friend'}!
+                </Text>
+                <Text style={styles.dogStatus}>
+                  {dogs.length > 0 
+                    ? `You have ${dogs.length} ${dogs.length === 1 ? 'dog' : 'dogs'} 🐾` 
+                    : 'Add your dogs to get started 🐾'}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
 
-        {/* Quick Access Menu */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Access</Text>
-          <View style={styles.quickAccessGrid}>
-            {/* Walk Tile */}
-            <TouchableOpacity 
-              style={styles.quickAccessTile}
-              onPress={() => navigation.navigate('AddWalk')}
-            >
-              <View style={styles.tileIconContainer}>
-                <FontAwesome5 name="map-marker-alt" size={24} color="#8B5CF6" />
-              </View>
-              <Text style={styles.tileText}>Walk</Text>
-            </TouchableOpacity>
+          {/* Quick Access Menu */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Quick Access</Text>
+            <View style={styles.quickAccessGrid}>
+              {/* Walk Tile */}
+              <TouchableOpacity 
+                style={styles.quickAccessTile}
+                onPress={() => navigation.navigate('AddWalk')}
+              >
+                <View style={styles.tileIconContainer}>
+                  <FontAwesome5 name="map-marker-alt" size={24} color="#8B5CF6" />
+                </View>
+                <Text style={styles.tileText}>Walk</Text>
+              </TouchableOpacity>
+              
+              {/* Pee Tile */}
+              <TouchableOpacity 
+                style={styles.quickAccessTile}
+                onPress={() => navigation.navigate('LogActivity', { activityType: 'Pee' })}
+              >
+                <View style={styles.tileIconContainer}>
+                  <FontAwesome5 name="tint" size={24} color="#FBBF24" />
+                </View>
+                <Text style={styles.tileText}>Pee</Text>
+              </TouchableOpacity>
+              
+              {/* Poop Tile */}
+              <TouchableOpacity 
+                style={styles.quickAccessTile}
+                onPress={() => navigation.navigate('LogActivity', { activityType: 'Poop' })}
+              >
+                <View style={styles.tileIconContainer}>
+                  <Text style={styles.emojiIcon}>💩</Text>
+                </View>
+                <Text style={styles.tileText}>Poop</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Today's Activities */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Today's Recent Activities</Text>
+              <TouchableOpacity 
+                style={styles.primaryButton}
+                onPress={() => navigation.navigate('ActivitiesTab')}
+              >
+                <Text style={styles.buttonText}>Log Activity</Text>
+              </TouchableOpacity>
+            </View>
             
-            {/* Pee Tile */}
-            <TouchableOpacity 
-              style={styles.quickAccessTile}
-              onPress={() => navigation.navigate('LogActivity', { activityType: 'Pee' })}
+            {/* Activity Cards */}
+            <View style={styles.activityList}>
+              {activitiesLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text style={styles.loadingText}>Loading activities...</Text>
+                </View>
+              ) : activities.length === 0 ? (
+                <View style={styles.emptyStateContainer}>
+                  <Text style={styles.emptyStateText}>No activities recorded today.</Text>
+                  <TouchableOpacity 
+                    style={styles.emptyStateButton}
+                    onPress={() => navigation.navigate('ActivitiesTab')}
+                  >
+                    <Text style={styles.emptyStateButtonText}>Log Your First Activity</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                activities.map((activity, index) => {
+                  const { emoji, bgColor } = getActivityIconInfo(activity.activity_type);
+                  return (
+                    <TouchableOpacity 
+                      key={activity.id || index} 
+                      style={styles.activityCard}
+                      onPress={() => navigation.navigate('ActivityDetails', { activityId: activity.id })}
+                    >
+                      <View style={[styles.activityIcon, { backgroundColor: bgColor }]}>
+                        <Text style={styles.activityEmoji}>{emoji}</Text>
+                      </View>
+                      <View style={styles.activityDetails}>
+                        <Text style={styles.activityTitle}>
+                          {getActivityTitle(activity)}
+                          {activity.dog_name !== 'Unknown Dog' && ` • ${activity.dog_name}`}
+                        </Text>
+                        <Text style={styles.activityTime}>
+                          {formatActivityTime(activity.start_time, activity.duration_minutes)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          </View>
+
+          {/* AI Insights */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>AI Insights</Text>
+            </View>
+            <LinearGradient
+              colors={['#8b5cf6', '#ec4899']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.aiInsightCard}
             >
-              <View style={styles.tileIconContainer}>
-                <FontAwesome5 name="tint" size={24} color="#FBBF24" />
+              <View style={styles.aiHeader}>
+                <Ionicons name="sparkles" size={20} color="white" />
+                <Text style={styles.aiTitle}>Smart Recommendations</Text>
               </View>
-              <Text style={styles.tileText}>Pee</Text>
-            </TouchableOpacity>
-            
-            {/* Poop Tile */}
-            <TouchableOpacity 
-              style={styles.quickAccessTile}
-              onPress={() => navigation.navigate('LogActivity', { activityType: 'Poop' })}
+              <Text style={styles.aiText}>
+                No insights available yet. Continue logging your pet's activities to receive personalized recommendations.
+              </Text>
+              <TouchableOpacity style={styles.aiButton}>
+                <Text style={{ color: '#8B5CF6', fontWeight: '500' }}>Learn More</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+
+          {/* Dogs Overview */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Your Dogs</Text>
+              <TouchableOpacity 
+                style={styles.viewAllButton}
+                onPress={() => navigation.navigate('DogsTab')}
+              >
+                <Text style={styles.viewAllText}>View All</Text>
+                <FontAwesome5 name="chevron-right" size={12} color="#8B5CF6" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.dogsList}>
+              {dogsLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text style={styles.loadingText}>Loading dogs...</Text>
+                </View>
+              ) : dogs.length === 0 ? (
+                <View style={styles.emptyStateContainer}>
+                  <Text style={styles.emptyStateText}>No dogs added yet.</Text>
+                  <TouchableOpacity 
+                    style={styles.emptyStateButton}
+                    onPress={() => navigation.navigate('AddDog')}
+                  >
+                    <Text style={styles.emptyStateButtonText}>Add Your Dog</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.dogsGrid}>
+                  {dogs.slice(0, 3).map((dog) => (
+                    <TouchableOpacity 
+                      key={dog.id} 
+                      style={styles.dogCard}
+                      onPress={() => navigation.navigate('DogProfile', { dogId: dog.id })}
+                    >
+                      <View style={styles.dogAvatar}>
+                        {dog.photo_url ? (
+                          <Image source={{ uri: dog.photo_url }} style={styles.dogImage} />
+                        ) : (
+                          <FontAwesome5 name="dog" size={24} color="#8B5CF6" />
+                        )}
+                      </View>
+                      <Text style={styles.dogName}>{dog.name}</Text>
+                      <Text style={styles.dogBreed}>{dog.breed}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Add Dog Profiles Button */}
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => navigation.navigate('DogsTab')}
             >
-              <View style={styles.tileIconContainer}>
-                <Text style={styles.emojiIcon}>💩</Text>
-              </View>
-              <Text style={styles.tileText}>Poop</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Today's Activities */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Today's Recent Activities</Text>
-            <TouchableOpacity 
-              style={styles.primaryButton}
-              onPress={() => navigation.navigate('ActivityLog')}
-            >
-              <Text style={styles.buttonText}>Log Activity</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Activity Cards */}
-          <View style={styles.activityList}>
-            {/* Morning Walk Card */}
-            <TouchableOpacity style={styles.activityCard}>
-              <View style={[styles.activityIcon, { backgroundColor: '#F3E8FF' }]}>
-                <Text style={styles.activityEmoji}>🐾</Text>
-              </View>
-              <View style={styles.activityDetails}>
-                <Text style={styles.activityTitle}>Morning Walk</Text>
-                <Text style={styles.activityTime}>8:30 AM • 25 mins</Text>
-              </View>
-            </TouchableOpacity>
-            
-            {/* Breakfast Card */}
-            <TouchableOpacity style={styles.activityCard}>
-              <View style={[styles.activityIcon, { backgroundColor: '#DBEAFE' }]}>
-                <Text style={styles.activityEmoji}>🍳</Text>
-              </View>
-              <View style={styles.activityDetails}>
-                <Text style={styles.activityTitle}>Breakfast</Text>
-                <Text style={styles.activityTime}>9:00 AM</Text>
-              </View>
-            </TouchableOpacity>
-            
-            {/* Play Time Card */}
-            <TouchableOpacity style={styles.activityCard}>
-              <View style={[styles.activityIcon, { backgroundColor: '#D1FAE5' }]}>
-                <Text style={styles.activityEmoji}>🎾</Text>
-              </View>
-              <View style={styles.activityDetails}>
-                <Text style={styles.activityTitle}>Play Time</Text>
-                <Text style={styles.activityTime}>10:15 AM • 30 mins</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* AI Insights */}
-        <View style={styles.section}>
-          <LinearGradient
-            colors={['#8b5cf6', '#ec4899']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.aiInsightCard}
-          >
-            <View style={styles.aiHeader}>
-              <FontAwesome5 name="robot" size={22} color="#FFFFFF" />
-              <Text style={styles.aiTitle}>AI Insight</Text>
-            </View>
-            <Text style={styles.aiText}>
-              Lucy-Loo has met her walk goal 5 days in a row! Keep up the great work! 🎉
-            </Text>
-            <TouchableOpacity style={styles.aiButton}>
-              <Text style={styles.aiButtonText}>View More Insights</Text>
-            </TouchableOpacity>
-          </LinearGradient>
-        </View>
-
-        {/* Upcoming Activities */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Upcoming Activities</Text>
-            <TouchableOpacity style={styles.viewAllButton}>
-              <Text style={styles.viewAllText}>View All</Text>
-              <FontAwesome5 name="chevron-right" size={12} color="#8B5CF6" />
+              <Text style={styles.actionButtonText}>Manage Dog Profiles</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.upcomingList}>
-            <View style={styles.upcomingCard}>
-              <View style={styles.upcomingHeader}>
-                <View style={styles.upcomingInfo}>
-                  <View style={[styles.iconBg, { backgroundColor: '#FEF3C7' }]}>
-                    <FontAwesome5 name="pills" size={16} color="#F59E0B" />
-                  </View>
-                  <View>
-                    <Text style={styles.upcomingTitle}>Medicine Time</Text>
-                    <Text style={styles.upcomingTime}>Today, 2:30 PM</Text>
-                  </View>
-                </View>
-                <View style={[styles.badgeBg, { backgroundColor: '#FEF3C7' }]}>
-                  <Text style={[styles.badgeText, { color: '#F59E0B' }]}>In 2h</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.upcomingCard}>
-              <View style={styles.upcomingHeader}>
-                <View style={styles.upcomingInfo}>
-                  <View style={[styles.iconBg, { backgroundColor: '#D1FAE5' }]}>
-                    <FontAwesome5 name="walking" size={16} color="#10B981" />
-                  </View>
-                  <View>
-                    <Text style={styles.upcomingTitle}>Evening Walk</Text>
-                    <Text style={styles.upcomingTime}>Today, 5:00 PM</Text>
-                  </View>
-                </View>
-                <View style={[styles.badgeBg, { backgroundColor: '#D1FAE5' }]}>
-                  <Text style={[styles.badgeText, { color: '#10B981' }]}>In 4.5h</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.upcomingCard}>
-              <View style={styles.upcomingHeader}>
-                <View style={styles.upcomingInfo}>
-                  <View style={[styles.iconBg, { backgroundColor: '#DBEAFE' }]}>
-                    <FontAwesome5 name="utensils" size={16} color="#3B82F6" />
-                  </View>
-                  <View>
-                    <Text style={styles.upcomingTitle}>Dinner Time</Text>
-                    <Text style={styles.upcomingTime}>Today, 7:00 PM</Text>
-                  </View>
-                </View>
-                <View style={[styles.badgeBg, { backgroundColor: '#DBEAFE' }]}>
-                  <Text style={[styles.badgeText, { color: '#3B82F6' }]}>In 6.5h</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Add Dog Profiles Button */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={{ backgroundColor: '#10b981', padding: 12, marginTop: 8, borderRadius: 8 }}
-            onPress={() => navigation.navigate('DogProfiles')}
-          >
-            <Text style={{ color: 'white', textAlign: 'center' }}>View Dog Profiles</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bottom space to account for footer */}
-        <View style={{ height: 80 }} />
-      </ScrollView>
-
-      {/* Bottom Navigation */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.footerItem}>
-          <FontAwesome5 name="home" size={20} color="#8B5CF6" />
-          <Text style={[styles.footerText, styles.activeFooterText]}>Home</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.footerItem}
-          onPress={() => navigation.navigate('ActivityLog')}
-        >
-          <FontAwesome5 name="calendar-alt" size={20} color="#9CA3AF" />
-          <Text style={styles.footerText}>Activities</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.footerItem}
-          onPress={() => navigation.navigate('DogProfiles')}
-        >
-          <FontAwesome5 name="paw" size={20} color="#9CA3AF" />
-          <Text style={styles.footerText}>Dogs</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.footerItem}>
-          <FontAwesome5 name="cog" size={20} color="#9CA3AF" />
-          <Text style={styles.footerText}>Settings</Text>
-        </TouchableOpacity>
-      </View>
+          {/* Bottom padding for content */}
+          <View style={{ height: 80 }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
@@ -299,10 +491,11 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     paddingHorizontal: 16,
-    paddingVertical: 24,
+    paddingVertical: 16,
     backgroundColor: '#F5F3FF',
     borderRadius: 8,
     margin: 16,
+    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -312,45 +505,34 @@ const styles = StyleSheet.create({
   heroContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-  },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 3,
-    borderColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    gap: 10,
   },
   greeting: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#6B7280',
     fontWeight: '400',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   dogStatus: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#8B5CF6',
   },
   section: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1F2937',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   quickAccessGrid: {
     flexDirection: 'row',
@@ -437,8 +619,13 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   aiInsightCard: {
-    padding: 16,
     borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   aiHeader: {
     flexDirection: 'row',
@@ -462,11 +649,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignSelf: 'flex-start',
   },
-  aiButtonText: {
-    color: '#8B5CF6',
-    fontSize: 14,
-    fontWeight: '500',
-  },
   viewAllButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -476,70 +658,89 @@ const styles = StyleSheet.create({
     color: '#8B5CF6',
     fontSize: 14,
   },
-  upcomingList: {
-    gap: 12,
+  dogsList: {
+    marginTop: 4,
   },
-  upcomingCard: {
+  dogCard: {
     backgroundColor: 'white',
-    padding: 16,
     borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    width: '31%',
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 1,
-    elevation: 1,
-    marginBottom: 12,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  upcomingHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  upcomingInfo: {
-    flexDirection: 'row',
+  dogAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
+    marginBottom: 8,
   },
-  upcomingTitle: {
+  dogImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 30,
+  },
+  dogName: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 4,
   },
-  upcomingTime: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  badgeBg: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeText: {
+  dogBreed: {
     fontSize: 12,
-    fontWeight: '500',
+    color: '#6B7280',
+    textAlign: 'center',
   },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  dogsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
-    backgroundColor: 'white',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
   },
-  footerItem: {
+  actionButton: {
+    backgroundColor: '#8B5CF6',
+    padding: 12,
+    borderRadius: 8,
     alignItems: 'center',
   },
-  footerText: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#9CA3AF',
+  actionButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
   },
-  activeFooterText: {
-    color: '#8B5CF6',
+  loadingContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 8,
+    color: '#6B7280',
+  },
+  emptyStateContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    color: '#6B7280',
+    marginBottom: 16,
+  },
+  emptyStateButton: {
+    backgroundColor: '#8B5CF6',
+    padding: 12,
+    borderRadius: 20,
+  },
+  emptyStateButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 
