@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -6,16 +6,59 @@ import {
   TouchableOpacity, 
   StyleSheet,
   SafeAreaView,
-  StatusBar
+  StatusBar,
+  Modal,
+  FlatList,
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { supabase } from '../src/lib/supabase';
 
 const LogActivityScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
   const { activityType } = route.params;
   const [notes, setNotes] = useState('');
+  
+  // Add state for dog selection
+  const [dogs, setDogs] = useState([]);
+  const [selectedDog, setSelectedDog] = useState(null);
+  const [dogsLoading, setDogsLoading] = useState(true);
+  const [dogModalVisible, setDogModalVisible] = useState(false);
+  
+  // Add state for saving
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Fetch dogs from Supabase
+  const fetchDogs = async () => {
+    try {
+      setDogsLoading(true);
+      const { data, error } = await supabase
+        .from('dogs')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching dogs:', error);
+        Alert.alert('Error', 'Unable to load dogs');
+        return;
+      }
+
+      setDogs(data || []);
+    } catch (error) {
+      console.error('Unexpected error fetching dogs:', error);
+      Alert.alert('Error', 'Something went wrong while loading dogs');
+    } finally {
+      setDogsLoading(false);
+    }
+  };
+
+  // Fetch dogs when component mounts
+  useEffect(() => {
+    fetchDogs();
+  }, []);
 
   // Activity type icons mapping
   const getActivityIcon = () => {
@@ -28,6 +71,51 @@ const LogActivityScreen = () => {
         return <Text style={styles.emojiIcon}>💩</Text>;
       default:
         return <FontAwesome5 name="paw" size={24} color="#8B5CF6" />;
+    }
+  };
+
+  // Handle saving activity to Supabase
+  const saveActivity = async () => {
+    if (!selectedDog) {
+      Alert.alert('Error', 'Please select a dog for this activity');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      
+      const activityData = {
+        activity_type: activityType.toLowerCase(),
+        start_time: new Date().toISOString(),
+        notes: notes.trim(),
+        dog_id: selectedDog.id,
+      };
+      
+      const { data, error } = await supabase
+        .from('activities')
+        .insert([activityData]);
+
+      if (error) {
+        console.error('Error saving activity:', error);
+        Alert.alert('Error', 'Failed to save activity');
+        return;
+      }
+
+      Alert.alert(
+        "Success", 
+        `${activityType} activity has been logged successfully!`,
+        [
+          { 
+            text: "OK", 
+            onPress: () => navigation.navigate('HomeTab') 
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Unexpected error saving activity:', error);
+      Alert.alert('Error', 'Something went wrong');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -51,6 +139,46 @@ const LogActivityScreen = () => {
           <Text style={styles.activityTypeText}>{activityType}</Text>
         </View>
 
+        {/* Dog Selection */}
+        <View style={styles.section}>
+          <Text style={styles.inputLabel}>Select Dog</Text>
+          {dogsLoading ? (
+            <View style={styles.loadingDogs}>
+              <ActivityIndicator size="small" color="#8B5CF6" />
+              <Text style={styles.loadingText}>Loading dogs...</Text>
+            </View>
+          ) : dogs.length === 0 ? (
+            <View style={styles.noDogs}>
+              <Text style={styles.noDogsText}>No dogs found</Text>
+              <TouchableOpacity 
+                style={styles.addDogButton}
+                onPress={() => navigation.navigate('AddDog')}
+              >
+                <Text style={styles.addDogButtonText}>Add a Dog</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.dogSelector}
+              onPress={() => setDogModalVisible(true)}
+            >
+              {selectedDog ? (
+                <View style={styles.selectedDogContainer}>
+                  <View style={styles.dogIconContainer}>
+                    <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                  </View>
+                  <Text style={styles.selectedDogText}>{selectedDog.name}</Text>
+                </View>
+              ) : (
+                <View style={styles.selectDogPlaceholder}>
+                  <Text style={styles.selectDogText}>Select a dog</Text>
+                  <FontAwesome5 name="chevron-down" size={16} color="#6B7280" />
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Notes Input */}
         <View style={styles.inputSection}>
           <Text style={styles.inputLabel}>Notes</Text>
@@ -66,15 +194,74 @@ const LogActivityScreen = () => {
 
         {/* Save Button */}
         <TouchableOpacity
-          style={styles.saveButton}
-          onPress={() => {
-            // For now, just navigate back to HomeScreen
-            navigation.navigate('Home');
-          }}
+          style={[
+            styles.saveButton, 
+            (!selectedDog && dogs.length > 0) && styles.saveButtonDisabled
+          ]}
+          onPress={saveActivity}
+          disabled={!selectedDog || isSaving}
         >
-          <Text style={styles.saveButtonText}>Save Activity</Text>
+          {isSaving ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Activity</Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* Dog Selection Modal */}
+      <Modal
+        transparent={true}
+        visible={dogModalVisible}
+        animationType="slide"
+        onRequestClose={() => setDogModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select a Dog</Text>
+              <TouchableOpacity 
+                onPress={() => setDogModalVisible(false)}
+              >
+                <FontAwesome5 name="times" size={20} color="#4B5563" />
+              </TouchableOpacity>
+            </View>
+            
+            <FlatList
+              data={dogs}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.dogItem}
+                  onPress={() => {
+                    setSelectedDog(item);
+                    setDogModalVisible(false);
+                  }}
+                >
+                  <View style={styles.dogIconContainer}>
+                    <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                  </View>
+                  <Text style={styles.dogItemText}>{item.name}</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.noDogsText}>No dogs found</Text>
+              }
+            />
+            
+            <TouchableOpacity 
+              style={styles.addDogButtonInModal}
+              onPress={() => {
+                setDogModalVisible(false);
+                navigation.navigate('AddDog');
+              }}
+            >
+              <FontAwesome5 name="plus" size={16} color="white" style={{ marginRight: 8 }} />
+              <Text style={styles.addDogButtonText}>Add New Dog</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -136,6 +323,9 @@ const styles = StyleSheet.create({
   emojiIcon: {
     fontSize: 24,
   },
+  section: {
+    marginBottom: 24,
+  },
   inputSection: {
     marginBottom: 24,
   },
@@ -166,10 +356,132 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
+  saveButtonDisabled: {
+    backgroundColor: '#C4B5FD',
+  },
   saveButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  dogSelector: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 12,
+  },
+  selectedDogContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dogIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  selectedDogText: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  selectDogPlaceholder: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  selectDogText: {
+    fontSize: 16,
+    color: '#9CA3AF',
+  },
+  loadingDogs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+  },
+  loadingText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  noDogs: {
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+  },
+  noDogsText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  addDogButton: {
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addDogButtonText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  dogItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  dogItemText: {
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  addDogButtonInModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#8B5CF6',
+    paddingVertical: 12,
+    marginTop: 16,
+    borderRadius: 8,
   },
 });
 

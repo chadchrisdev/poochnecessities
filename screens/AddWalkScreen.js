@@ -10,7 +10,10 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Dimensions
+  Dimensions,
+  Animated,
+  Modal,
+  FlatList
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -19,6 +22,7 @@ import { format } from 'date-fns';
 import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { getDistance } from 'geolib';
+import { supabase } from '../src/lib/supabase';
 
 const { width } = Dimensions.get('window');
 const DEFAULT_LATITUDE = 37.78825;
@@ -29,6 +33,8 @@ const LONGITUDE_DELTA = 0.005;
 const AddWalkScreen = () => {
   const navigation = useNavigation();
   const mapRef = useRef(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef(null);
   
   // State variables for timer functionality
   const [startTime, setStartTime] = useState(null);
@@ -58,6 +64,15 @@ const AddWalkScreen = () => {
   const [pace, setPace] = useState(null);
   const [locationSubscription, setLocationSubscription] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Add state for loading indicator
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Add state for dog selection
+  const [dogs, setDogs] = useState([]);
+  const [selectedDog, setSelectedDog] = useState(null);
+  const [dogsLoading, setDogsLoading] = useState(true);
+  const [dogModalVisible, setDogModalVisible] = useState(false);
   
   // Calculate completion percentage whenever distance or target distance changes
   useEffect(() => {
@@ -309,6 +324,118 @@ const AddWalkScreen = () => {
     return `${(targetDistance / 1000).toFixed(1)} km`;
   };
 
+  // Fetch dogs from Supabase
+  const fetchDogs = async () => {
+    try {
+      setDogsLoading(true);
+      const { data, error } = await supabase
+        .from('dogs')
+        .select('id, name')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching dogs:', error);
+        Alert.alert('Error', 'Unable to load dogs');
+        return;
+      }
+
+      setDogs(data || []);
+    } catch (error) {
+      console.error('Unexpected error fetching dogs:', error);
+      Alert.alert('Error', 'Something went wrong while loading dogs');
+    } finally {
+      setDogsLoading(false);
+    }
+  };
+
+  // Fetch dogs when component mounts
+  useEffect(() => {
+    fetchDogs();
+  }, []);
+
+  // Modified save function to include selected dog
+  const handleSaveWalk = async () => {
+    if (!selectedDog) {
+      Alert.alert('Error', 'Please select a dog for this walk');
+      return;
+    }
+
+    try {
+      // Show loading indicator
+      setIsSaving(true);
+      
+      const { data, error } = await supabase
+        .from('activities')
+        .insert([
+          {
+            activity_type: 'walk',
+            start_time: startTime.toISOString(),
+            end_time: endTime ? endTime.toISOString() : null,
+            duration_minutes: duration, 
+            distance_meters: distance, 
+            notes: notes,
+            dog_id: selectedDog.id,
+            dog_name: selectedDog.name
+          }
+        ]);
+
+      if (error) {
+        console.error('Error saving walk:', error.message);
+        Alert.alert('Error', 'There was a problem saving your walk.');
+      } else {
+        console.log('Walk saved to activities:', data);
+        Alert.alert('Success', 'Walk saved successfully!', [
+          { text: "OK", onPress: () => navigation.navigate('HomeTab') }
+        ]);
+      }
+    } catch (e) {
+      console.error('Unexpected error saving walk:', e.message);
+      Alert.alert('Error', 'Unexpected error saving walk.');
+    } finally {
+      // Hide loading indicator
+      setIsSaving(false);
+    }
+  };
+
+  // Calculate map height based on scroll position - simple interpolation 
+  const mapHeight = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [250, 100],
+    extrapolate: 'clamp' // clamp so it doesn't go below or above
+  });
+  
+  // Calculate map border and shadow properties based on scroll
+  const mapBorderRadius = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [12, 20],
+    extrapolate: 'clamp'
+  });
+  
+  const mapShadowOpacity = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [0.1, 0.3],
+    extrapolate: 'clamp'
+  });
+
+  const mapScale = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [1, 0.95],
+    extrapolate: 'clamp'
+  });
+
+  // Calculate opacity for the expand indicator
+  const expandIndicatorOpacity = scrollY.interpolate({
+    inputRange: [50, 100],
+    outputRange: [0, 1],
+    extrapolate: 'clamp'
+  });
+
+  // Function to expand the map when collapsed map is pressed
+  const handleMapPress = () => {
+    // Simple condition without accessing _value directly
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -320,46 +447,127 @@ const AddWalkScreen = () => {
         <View style={{ width: 20 }} />
       </View>
       
-      {/* Map View */}
-      <View style={styles.mapContainer}>
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B5CF6" />
-            <Text style={styles.loadingText}>Getting your location...</Text>
-          </View>
-        ) : locationPermission !== 'granted' ? (
-          <View style={styles.permissionError}>
-            <FontAwesome5 name="exclamation-triangle" size={32} color="#EF4444" />
-            <Text style={styles.permissionErrorText}>
-              Location permission is required to track your walk.
-            </Text>
-          </View>
-        ) : (
-          <MapView
-            ref={mapRef}
-            style={styles.map}
-            provider={PROVIDER_GOOGLE}
-            showsUserLocation
-            followsUserLocation
-            initialRegion={{
-              latitude: currentLocation?.latitude || DEFAULT_LATITUDE,
-              longitude: currentLocation?.longitude || DEFAULT_LONGITUDE,
-              latitudeDelta: LATITUDE_DELTA,
-              longitudeDelta: LONGITUDE_DELTA,
-            }}
-          >
-            {walkPath.length > 1 && (
-              <Polyline
-                coordinates={walkPath}
-                strokeColor="#8B5CF6"
-                strokeWidth={4}
-              />
-            )}
-          </MapView>
+      <Animated.ScrollView 
+        ref={scrollViewRef}
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={16}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
         )}
-      </View>
+        decelerationRate="normal"
+      >
+        {/* Map View - Now in an Animated.View with dynamic height */}
+        <TouchableOpacity 
+          activeOpacity={0.9}
+          onPress={handleMapPress}
+        >
+          <Animated.View 
+            style={[
+              styles.mapContainer, 
+              { 
+                height: mapHeight,
+                borderRadius: mapBorderRadius,
+                shadowOpacity: mapShadowOpacity,
+                transform: [{ scale: mapScale }]
+              }
+            ]}
+          >
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#8B5CF6" />
+                <Text style={styles.loadingText}>Getting your location...</Text>
+              </View>
+            ) : locationPermission !== 'granted' ? (
+              <View style={styles.permissionError}>
+                <FontAwesome5 name="exclamation-triangle" size={32} color="#EF4444" />
+                <Text style={styles.permissionErrorText}>
+                  Location permission is required to track your walk.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <MapView
+                  ref={mapRef}
+                  style={styles.map}
+                  provider={PROVIDER_GOOGLE}
+                  showsUserLocation
+                  followsUserLocation
+                  zoomControlEnabled
+                  showsMyLocationButton={true}
+                  initialRegion={{
+                    latitude: currentLocation?.latitude || DEFAULT_LATITUDE,
+                    longitude: currentLocation?.longitude || DEFAULT_LONGITUDE,
+                    latitudeDelta: LATITUDE_DELTA,
+                    longitudeDelta: LONGITUDE_DELTA,
+                  }}
+                >
+                  {walkPath.length > 1 && (
+                    <Polyline
+                      coordinates={walkPath}
+                      strokeColor="#8B5CF6"
+                      strokeWidth={4}
+                    />
+                  )}
+                </MapView>
+                
+                {/* Expand indicator that appears when map is collapsed */}
+                <Animated.View 
+                  style={[
+                    styles.expandIndicator,
+                    { opacity: expandIndicatorOpacity }
+                  ]}
+                >
+                  <FontAwesome5 name="expand" size={16} color="white" />
+                </Animated.View>
+              </>
+            )}
+          </Animated.View>
+        </TouchableOpacity>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Dog Selection - Before starting walk */}
+        {!isWalking && !endTime && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Select Dog</Text>
+            {dogsLoading ? (
+              <View style={styles.loadingDogs}>
+                <ActivityIndicator size="small" color="#8B5CF6" />
+                <Text style={styles.loadingText}>Loading dogs...</Text>
+              </View>
+            ) : dogs.length === 0 ? (
+              <View style={styles.noDogs}>
+                <Text style={styles.noDogsText}>No dogs found</Text>
+                <TouchableOpacity 
+                  style={styles.addDogButton}
+                  onPress={() => navigation.navigate('AddDog')}
+                >
+                  <Text style={styles.addDogButtonText}>Add a Dog</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.dogSelector}
+                onPress={() => setDogModalVisible(true)}
+              >
+                {selectedDog ? (
+                  <View style={styles.selectedDogContainer}>
+                    <View style={styles.dogIconContainer}>
+                      <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                    </View>
+                    <Text style={styles.selectedDogText}>{selectedDog.name}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.selectDogPlaceholder}>
+                    <Text style={styles.selectDogText}>Select a dog</Text>
+                    <FontAwesome5 name="chevron-down" size={16} color="#6B7280" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Target Distance Setting (only shown before starting) */}
         {!isWalking && !endTime && (
           <View style={styles.targetDistanceSection}>
@@ -401,33 +609,44 @@ const AddWalkScreen = () => {
           </View>
         )}
         
-        {/* Timer Controls */}
-        <View style={styles.timerControls}>
-          <TouchableOpacity 
-            style={[
-              styles.timerButton, 
-              styles.startButton,
-              isWalking && styles.disabledButton
-            ]}
-            onPress={handleStartWalk}
-            disabled={isWalking || locationPermission !== 'granted'}
-          >
-            <FontAwesome5 name="play" size={16} color="white" style={styles.buttonIcon} />
-            <Text style={styles.timerButtonText}>Start Walk</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[
-              styles.timerButton, 
-              styles.stopButton,
-              (!isWalking || endTime) && styles.disabledButton
-            ]}
-            onPress={handleStopWalk}
-            disabled={!isWalking || endTime !== null}
-          >
-            <FontAwesome5 name="stop" size={16} color="white" style={styles.buttonIcon} />
-            <Text style={styles.timerButtonText}>Stop Walk</Text>
-          </TouchableOpacity>
+        {/* Walk Controls */}
+        <View style={styles.walkControls}>
+          {!isWalking && !endTime ? (
+            <TouchableOpacity 
+              style={[
+                styles.startButton, 
+                (!selectedDog && dogs.length > 0) && styles.disabledButton
+              ]}
+              onPress={handleStartWalk}
+              disabled={!selectedDog && dogs.length > 0}
+            >
+              <FontAwesome5 name="play" size={16} color="white" style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Start Walk</Text>
+            </TouchableOpacity>
+          ) : isWalking ? (
+            <TouchableOpacity 
+              style={styles.stopButton}
+              onPress={handleStopWalk}
+            >
+              <FontAwesome5 name="stop" size={16} color="white" style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Stop Walk</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={styles.saveButton}
+              onPress={handleSaveWalk}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <>
+                  <FontAwesome5 name="save" size={16} color="white" style={styles.buttonIcon} />
+                  <Text style={styles.buttonText}>Save Walk</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
         
         {/* Walk Stats */}
@@ -521,62 +740,64 @@ const AddWalkScreen = () => {
           </View>
         )}
         
-        {/* Time Details Section */}
+        {/* Time Details Section - Refactored to be side by side */}
         <View style={styles.timeDetailsSection}>
-          {/* Start Time */}
-          <View style={styles.timeDetail}>
-            <Text style={styles.timeLabel}>Start Time</Text>
-            <View style={styles.timeRow}>
-              <View style={styles.timeDisplay}>
-                <Text style={styles.timeText}>{formatTime(startTime)}</Text>
+          <View style={styles.timeRow}>
+            {/* Start Time */}
+            <View style={styles.timeDetail}>
+              <Text style={styles.timeLabel}>Start Time</Text>
+              <View style={styles.timeInputRow}>
+                <View style={styles.timeDisplay}>
+                  <Text style={styles.timeText}>{formatTime(startTime)}</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.timeEditButton}
+                  onPress={() => setShowStartPicker(true)}
+                >
+                  <FontAwesome5 name="clock" size={18} color="#8B5CF6" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity 
-                style={styles.timeEditButton}
-                onPress={() => setShowStartPicker(true)}
-              >
-                <FontAwesome5 name="clock" size={18} color="#8B5CF6" />
-              </TouchableOpacity>
+              
+              {showStartPicker && (
+                <DateTimePicker
+                  value={startTime || new Date()}
+                  mode="time"
+                  is24Hour={false}
+                  display="default"
+                  onChange={(event, selectedTime) => onTimeChange(event, selectedTime, 'start')}
+                />
+              )}
             </View>
             
-            {showStartPicker && (
-              <DateTimePicker
-                value={startTime || new Date()}
-                mode="time"
-                is24Hour={false}
-                display="default"
-                onChange={(event, selectedTime) => onTimeChange(event, selectedTime, 'start')}
-              />
-            )}
-          </View>
-          
-          {/* End Time */}
-          <View style={styles.timeDetail}>
-            <Text style={styles.timeLabel}>End Time</Text>
-            <View style={styles.timeRow}>
-              <View style={styles.timeDisplay}>
-                <Text style={styles.timeText}>{formatTime(endTime)}</Text>
+            {/* End Time */}
+            <View style={styles.timeDetail}>
+              <Text style={styles.timeLabel}>End Time</Text>
+              <View style={styles.timeInputRow}>
+                <View style={styles.timeDisplay}>
+                  <Text style={styles.timeText}>{formatTime(endTime)}</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.timeEditButton}
+                  onPress={() => setShowEndPicker(true)}
+                >
+                  <FontAwesome5 name="clock" size={18} color="#8B5CF6" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity 
-                style={styles.timeEditButton}
-                onPress={() => setShowEndPicker(true)}
-              >
-                <FontAwesome5 name="clock" size={18} color="#8B5CF6" />
-              </TouchableOpacity>
+              
+              {showEndPicker && (
+                <DateTimePicker
+                  value={endTime || new Date()}
+                  mode="time"
+                  is24Hour={false}
+                  display="default"
+                  onChange={(event, selectedTime) => onTimeChange(event, selectedTime, 'end')}
+                />
+              )}
             </View>
-            
-            {showEndPicker && (
-              <DateTimePicker
-                value={endTime || new Date()}
-                mode="time"
-                is24Hour={false}
-                display="default"
-                onChange={(event, selectedTime) => onTimeChange(event, selectedTime, 'end')}
-              />
-            )}
           </View>
         </View>
         
-        {/* Notes Section */}
+        {/* Notes Section - Moved directly under time section */}
         <View style={styles.notesSection}>
           <Text style={styles.timeLabel}>Notes</Text>
           <TextInput
@@ -588,21 +809,64 @@ const AddWalkScreen = () => {
             numberOfLines={4}
           />
         </View>
-      </ScrollView>
+
+        {/* Extra space at bottom to ensure content isn't hidden by footer */}
+        <View style={{ height: 80 }} />
+      </Animated.ScrollView>
       
-      {/* Save Button (Footer) */}
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={() => {
-            // Later we'll save targetDistance and completionPercentage with the walk data
-            // For now, just navigate back to HomeScreen
-            navigation.navigate('Home');
-          }}
-        >
-          <Text style={styles.saveButtonText}>Save Walk</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Dog Selection Modal */}
+      <Modal
+        transparent={true}
+        visible={dogModalVisible}
+        animationType="slide"
+        onRequestClose={() => setDogModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select a Dog</Text>
+              <TouchableOpacity 
+                onPress={() => setDogModalVisible(false)}
+              >
+                <FontAwesome5 name="times" size={20} color="#4B5563" />
+              </TouchableOpacity>
+            </View>
+            
+            <FlatList
+              data={dogs}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.dogItem}
+                  onPress={() => {
+                    setSelectedDog(item);
+                    setDogModalVisible(false);
+                  }}
+                >
+                  <View style={styles.dogIconContainer}>
+                    <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                  </View>
+                  <Text style={styles.dogItemText}>{item.name}</Text>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.noDogsText}>No dogs found</Text>
+              }
+            />
+            
+            <TouchableOpacity 
+              style={styles.addDogButtonInModal}
+              onPress={() => {
+                setDogModalVisible(false);
+                navigation.navigate('AddDog');
+              }}
+            >
+              <FontAwesome5 name="plus" size={16} color="white" style={{ marginRight: 8 }} />
+              <Text style={styles.addDogButtonText}>Add New Dog</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -634,12 +898,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1F2937',
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+  },
   mapContainer: {
     width: '100%',
-    height: 250,
     backgroundColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   map: {
     width: '100%',
@@ -665,13 +942,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#6B7280',
     fontSize: 16,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 100, // Extra padding at bottom for footer
   },
   targetDistanceSection: {
     marginBottom: 20,
@@ -861,41 +1131,70 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
   },
-  timerControls: {
+  walkControls: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  timerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    padding: 14,
-    borderRadius: 8,
-    width: '48%',
+    marginBottom: 20,
   },
   startButton: {
     backgroundColor: '#10B981', // Green
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   stopButton: {
     backgroundColor: '#EF4444', // Red
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  disabledButton: {
-    opacity: 0.5,
+  saveButton: {
+    backgroundColor: '#8B5CF6',
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   buttonIcon: {
     marginRight: 8,
   },
-  timerButtonText: {
+  buttonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
   },
   timeDetailsSection: {
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   timeDetail: {
-    marginBottom: 16,
+    width: '48%',
   },
   timeLabel: {
     fontSize: 16,
@@ -903,7 +1202,7 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     marginBottom: 8,
   },
-  timeRow: {
+  timeInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -926,7 +1225,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   notesSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   notesInput: {
     backgroundColor: 'white',
@@ -938,31 +1237,132 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
   },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'white',
+  section: {
+    marginTop: 16,
+    marginBottom: 8,
     padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  saveButton: {
-    backgroundColor: '#8B5CF6',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowRadius: 2,
     elevation: 2,
   },
-  saveButtonText: {
-    color: 'white',
+  sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 12,
+  },
+  dogSelector: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 12,
+  },
+  selectedDogContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dogIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  selectedDogText: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  selectDogPlaceholder: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  selectDogText: {
+    fontSize: 16,
+    color: '#9CA3AF',
+  },
+  loadingDogs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  noDogs: {
+    alignItems: 'center',
+    padding: 12,
+  },
+  noDogsText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  addDogButton: {
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addDogButtonText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  dogItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  dogItemText: {
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  addDogButtonInModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#8B5CF6',
+    paddingVertical: 12,
+    marginTop: 16,
+    borderRadius: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#C4B5FD', // Light purple
+    opacity: 0.7,
   },
 });
 

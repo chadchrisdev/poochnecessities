@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Initial Letter Avatars</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .avatar-container {
+      display: flex;
+      justify-content: space-around;
+      margin: 30px 0;
+    }
+    .avatar {
+      width: 120px;
+      height: 120px;
+      margin: 10px;
+    }
+    .avatar-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .instructions {
+      background-color: #f0f0f0;
+      padding: 20px;
+      border-radius: 5px;
+      margin-top: 40px;
+    }
+    h1, h2 {
+      text-align: center;
+    }
+    button {
+      margin-top: 10px;
+      padding: 5px 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <h1>Initial Letter Avatar Placeholders</h1>
+  <p>Below are three colored circle avatars with initial letters that you can use as placeholders in your app:</p>
+  
+  <div class="avatar-container">
+    <div class="avatar-wrapper">
+      <div class="avatar" id="avatar1"></div>
+      <h3>Blue Avatar</h3>
+      <button onclick="downloadSVG('avatar1', 'avatar1.png')">Download PNG</button>
+    </div>
+    
+    <div class="avatar-wrapper">
+      <div class="avatar" id="avatar2"></div>
+      <h3>Green Avatar</h3>
+      <button onclick="downloadSVG('avatar2', 'avatar2.png')">Download PNG</button>
+    </div>
+    
+    <div class="avatar-wrapper">
+      <div class="avatar" id="avatar3"></div>
+      <h3>Purple Avatar</h3>
+      <button onclick="downloadSVG('avatar3', 'avatar3.png')">Download PNG</button>
+    </div>
+  </div>
+  
+  <div class="instructions">
+    <h2>How to Save These Avatars</h2>
+    <p>To save these avatars for use in your app:</p>
+    <ol>
+      <li>Click the "Download PNG" button under each avatar</li>
+      <li>Save the file to your <code>assets/avatars/</code> directory</li>
+      <li>Make sure to name them as <code>avatar1.png</code>, <code>avatar2.png</code>, and <code>avatar3.png</code></li>
+      <li>The avatars should now work with your placeholder avatar selection feature</li>
+    </ol>
+    <p>Note: If the download buttons don't work in your environment, you can also:</p>
+    <ol>
+      <li>Right-click on each avatar</li>
+      <li>Select "Save image as..."</li>
+      <li>Save to your assets directory with the appropriate filename</li>
+    </ol>
+  </div>
+
+  <script>
+    // Avatar 1 - Blue background with "A"
+    const avatar1SVG = `
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="58" fill="#4C6BF5" stroke="#3A54C5" stroke-width="4"/>
+  
+  <!-- Initial letter -->
+  <text x="60" y="78" font-family="Arial, sans-serif" font-size="65" font-weight="bold" fill="white" text-anchor="middle">A</text>
+</svg>`;
+
+    // Avatar 2 - Green background with "B"
+    const avatar2SVG = `
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="58" fill="#4CAF50" stroke="#3A8A3F" stroke-width="4"/>
+  
+  <!-- Initial letter -->
+  <text x="60" y="78" font-family="Arial, sans-serif" font-size="65" font-weight="bold" fill="white" text-anchor="middle">B</text>
+</svg>`;
+
+    // Avatar 3 - Purple background with "C"
+    const avatar3SVG = `
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="58" fill="#9C27B0" stroke="#7A1E8C" stroke-width="4"/>
+  
+  <!-- Initial letter -->
+  <text x="60" y="78" font-family="Arial, sans-serif" font-size="65" font-weight="bold" fill="white" text-anchor="middle">C</text>
+</svg>`;
+
+    // Render avatars
+    document.getElementById('avatar1').innerHTML = avatar1SVG;
+    document.getElementById('avatar2').innerHTML = avatar2SVG;
+    document.getElementById('avatar3').innerHTML = avatar3SVG;
+
+    // Function to download avatar as PNG
+    function downloadSVG(elementId, filename) {
+      const svgElement = document.getElementById(elementId).querySelector('svg');
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      canvas.width = 120;
+      canvas.height = 120;
+      
+      const img = new Image();
+      img.onload = function() {
+        ctx.drawImage(img, 0, 0);
+        const pngFile = canvas.toDataURL('image/png');
+        
+        const downloadLink = document.createElement('a');
+        downloadLink.download = filename;
+        downloadLink.href = pngFile;
+        downloadLink.click();
+      };
+      
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    }
+  </script>
+</body>
+</html> 
