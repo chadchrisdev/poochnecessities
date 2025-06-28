@@ -25,8 +25,23 @@ const WalkHistoryScreen = () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('walks')
-        .select('*')
+        .from('activities')
+        .select(`
+          id,
+          activity_type,
+          start_time,
+          end_time,
+          distance_meters,
+          duration_minutes,
+          notes,
+          dog_id,
+          dogs (
+            id,
+            name,
+            photo_url
+          )
+        `)
+        .eq('activity_type', 'walk')
         .order('start_time', { ascending: false });
 
       if (error) {
@@ -68,7 +83,12 @@ const WalkHistoryScreen = () => {
     return `${(distanceMeters / 1000).toFixed(2)} km`;
   };
 
-  const renderWalkItem = ({ item }) => (
+  const renderWalkItem = ({ item }) => {
+    // Get dog information from the joined data
+    const dogName = item.dogs?.name || 'Unknown Dog';
+    const dogPhoto = item.dogs?.photo_url;
+    
+    return (
     <TouchableOpacity 
       style={styles.walkCard}
       onPress={() => navigation.navigate('WalkDetails', { walkId: item.id })}
@@ -80,6 +100,7 @@ const WalkHistoryScreen = () => {
       </View>
       <View style={styles.walkDetails}>
         <Text style={styles.walkDate}>{formatDate(item.start_time)}</Text>
+        <Text style={styles.dogName}>{dogName}</Text>
         <View style={styles.walkStats}>
           <View style={styles.statItem}>
             <View>
@@ -102,6 +123,7 @@ const WalkHistoryScreen = () => {
       </View>
     </TouchableOpacity>
   );
+  };
 
   const renderEmptyList = () => (
     <View style={styles.emptyContainer}>
@@ -226,6 +248,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
+    marginBottom: 4,
+  },
+  dogName: {
+    fontSize: 14,
+    color: '#4B5563',
     marginBottom: 4,
   },
   walkStats: {

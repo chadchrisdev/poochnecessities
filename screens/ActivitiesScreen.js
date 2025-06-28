@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
   FlatList, 
+  SectionList,
   TouchableOpacity, 
   StyleSheet, 
   SafeAreaView,
@@ -12,13 +13,18 @@ import {
   Alert,
   Modal,
   Animated,
-  Easing
+  Easing,
+  Image,
+  TextInput
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { supabase } from '../src/lib/supabase';
-import { format, subDays } from 'date-fns';
+import { format, subDays, parseISO, isToday } from 'date-fns';
 import { BlurView } from 'expo-blur';
+import { getActivityIcon, getActivityTitle } from '../constants/activityIcons';
+import ActivityIcon from '../src/components/ActivityIcon';
+import { navigateToActivityDetail } from '../src/utils/activityNavigationHelper';
 
 /**
  * ActivitiesScreen Component
@@ -119,22 +125,25 @@ const ActivitiesScreen = () => {
     try {
       setLoading(true);
       
-      // Start with the base query - modified to join with dogs table using foreign key
+      // Start with the base query with proper join using dog_id foreign key
       let query = supabase
         .from('activities')
         .select(`
-          *,
-          dogs(id, name)
+          id,
+          activity_type,
+          start_time,
+          end_time,
+          distance_meters,
+          duration_minutes,
+          notes,
+          dog_id,
+          dogs (
+            id,
+            name,
+            photo_url
+          )
         `)
-        /* Alternative format:
-          .select(`
-            *,
-            dog:dogs(name)
-          `)
-        */
-        .order('start_time', { ascending: false })
-        // Filter out walk activities
-        .neq('activity_type', 'walk');
+        .order('start_time', { ascending: false });
       
       // Apply dog filter if selected
       if (selectedDog) {
@@ -150,8 +159,8 @@ const ActivitiesScreen = () => {
       // Apply date range filter if selected
       if (selectedDateRange) {
         query = query
-          .gte('created_at', selectedDateRange.startDate.toISOString())
-          .lte('created_at', selectedDateRange.endDate.toISOString());
+          .gte('start_time', selectedDateRange.startDate.toISOString())
+          .lte('start_time', selectedDateRange.endDate.toISOString());
       }
       
       // Execute the query
@@ -163,30 +172,8 @@ const ActivitiesScreen = () => {
         return;
       }
 
-      // Process data to add dog_name from the joined dogs table
-      const processedData = (data || []).map(activity => {
-        // Get dog name from the dogs relation
-        let dogName = 'Unknown Dog';
-        
-        if (activity.dogs && activity.dogs.length > 0 && activity.dogs[0].name) {
-          // With proper foreign key, dogs will be an array with the joined dog data
-          dogName = activity.dogs[0].name;
-        } else if (activity.dog_id && activity.dogs && activity.dogs.length === 0) {
-          // Dog ID exists but no dog found - may have been deleted
-          dogName = 'Unknown Dog';
-        } else if (!activity.dog_id) {
-          // No dog assigned to this activity
-          dogName = 'No Dog Assigned';
-        }
-        
-        return {
-          ...activity,
-          dog_name: dogName
-        };
-      });
-
-      setActivities(processedData);
-      setFilteredActivities(processedData);
+      setActivities(data || []);
+      setFilteredActivities(data || []);
     } catch (error) {
       console.error('Unexpected error fetching activities:', error);
       Alert.alert('Error', 'Something went wrong while loading activities');
@@ -196,15 +183,49 @@ const ActivitiesScreen = () => {
     }
   };
 
+  // Fetch activities when component mounts
+  useEffect(() => {
+    fetchActivities();
+  }, []);
+
   // Refresh activities when filters change
   useEffect(() => {
     fetchActivities();
   }, [selectedDog, selectedActivityType, selectedDateRange]);
 
-  // Initial load
+  // Group activities by date for display
+  const groupActivitiesByDate = (activities) => {
+    if (!activities || activities.length === 0) return [];
+    
+    // Create a map of date strings to activities
+    const groupedMap = {};
+    
+    activities.forEach(activity => {
+      if (!activity.start_time) return;
+      
+      const dateStr = format(parseISO(activity.start_time), 'yyyy-MM-dd');
+      if (!groupedMap[dateStr]) {
+        groupedMap[dateStr] = {
+          title: format(parseISO(activity.start_time), 'EEEE, MMMM d'),
+          data: []
+        };
+      }
+      
+      groupedMap[dateStr].data.push(activity);
+    });
+    
+    // Convert map to array and sort by date (newest first)
+    return Object.values(groupedMap).sort((a, b) => {
+      const dateA = new Date(a.data[0].start_time);
+      const dateB = new Date(b.data[0].start_time);
+      return dateB - dateA; // Descending order
+    });
+  };
+
+  // Process activities when they change
   useEffect(() => {
-    fetchActivities();
-  }, []);
+    setFilteredActivities(activities || []);
+  }, [activities]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -271,121 +292,57 @@ const ActivitiesScreen = () => {
     }
   };
 
-  const getActivityIcon = (activityType) => {
-    switch (activityType) {
-      case 'walk':
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#F3E8FF' }]}>
-            <View>
-              <FontAwesome5 name="walking" size={22} color="#8B5CF6" />
-            </View>
-          </View>
-        );
-      case 'pee':
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#FEF3C7' }]}>
-            <View>
-              <FontAwesome5 name="tint" size={22} color="#FBBF24" />
-            </View>
-          </View>
-        );
-      case 'poop':
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#FEF3C7' }]}>
-            <View>
-              <FontAwesome5 name="poop" size={22} color="#B45309" />
-            </View>
-          </View>
-        );
-      case 'feeding':
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#DBEAFE' }]}>
-            <View>
-              <FontAwesome5 name="utensils" size={22} color="#3B82F6" />
-            </View>
-          </View>
-        );
-      case 'medication':
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#DCFCE7' }]}>
-            <View>
-              <FontAwesome5 name="pills" size={22} color="#10B981" />
-            </View>
-          </View>
-        );
-      default:
-        return (
-          <View style={[styles.activityIcon, { backgroundColor: '#E0E7FF' }]}>
-            <View>
-              <FontAwesome5 name="paw" size={22} color="#6366F1" />
-            </View>
-          </View>
-        );
-    }
-  };
-
-  const getActivityTitle = (activityType) => {
-    switch (activityType) {
-      case 'walk':
-        return 'Walk';
-      case 'pee':
-        return 'Pee Break';
-      case 'poop':
-        return 'Poop Break';
-      case 'feeding':
-        return 'Feeding';
-      case 'medication':
-        return 'Medication';
-      default:
-        return 'Activity';
-    }
+  const renderActivityIcon = (activityType) => {
+    const { component: IconComponent, name, color, bgColor } = getActivityIcon(activityType);
+    
+    return (
+      <View style={[styles.activityIconContainer, { backgroundColor: bgColor }]}>
+        <IconComponent name={name} size={24} color={color} />
+      </View>
+    );
   };
 
   const renderActivityItem = ({ item }) => {
-    const activityTitle = getActivityTitle(item.activity_type);
-    
     return (
       <TouchableOpacity 
         style={styles.activityCard}
-        onPress={() => {
-          // Navigate to activity details if needed
-          // navigation.navigate('ActivityDetails', { activityId: item.id });
-        }}
+        onPress={() => navigateToActivityDetail(navigation, item.id, item.activity_type)}
       >
-        {getActivityIcon(item.activity_type)}
+        {renderActivityIcon(item.activity_type)}
+        
+        {/* Activity info column */}
         <View style={styles.activityDetails}>
-          <Text style={styles.activityTitle}>{activityTitle}</Text>
-          <Text style={styles.activityTime}>{formatDateTime(item.start_time)}</Text>
-          
-          {/* Display dog name from the joined dogs table */}
-          <View style={styles.dogNameContainer}>
-            <FontAwesome5 name="dog" size={12} color="#6B7280" style={styles.dogIcon} />
-            <Text style={styles.dogName}>{item.dog_name || 'Unknown Dog'}</Text>
+          <Text style={styles.activityTitle}>
+            {getActivityTitle(item.activity_type)}
+          </Text>
+          <Text style={styles.activityTime}>
+            {format(parseISO(item.start_time), 'h:mm a')}
+            {item.duration_minutes && ` • ${item.duration_minutes} mins`}
+          </Text>
+        </View>
+        
+        {/* Dog info column with name and avatar */}
+        <View style={styles.dogActivityInfo}>
+          <View style={styles.dogTextContainer}>
+            <Text style={styles.activityDogName}>{item.dogs?.name || 'Unknown Dog'}</Text>
+            {item.notes && item.notes.length > 0 && (
+              <View style={styles.notesIndicator}>
+                <FontAwesome5 name="sticky-note" size={12} color="#8B5CF6" />
+              </View>
+            )}
           </View>
           
-          {item.activity_type === 'walk' && item.distance_meters && (
-            <View style={styles.walkStats}>
-              <View style={styles.statItem}>
-                <FontAwesome5 name="route" size={14} color="#6B7280" style={styles.statIcon} />
-                <Text style={styles.statText}>
-                  {(item.distance_meters / 1000).toFixed(2)} km
-                </Text>
-              </View>
-              {item.duration_minutes && (
-                <View style={styles.statItem}>
-                  <FontAwesome5 name="clock" size={14} color="#6B7280" style={styles.statIcon} />
-                  <Text style={styles.statText}>{item.duration_minutes} mins</Text>
-                </View>
-              )}
+          {/* Dog Avatar */}
+          {item.dogs?.photo_url ? (
+            <Image 
+              source={{ uri: item.dogs.photo_url }} 
+              style={styles.dogActivityAvatar} 
+            />
+          ) : (
+            <View style={styles.dogActivityAvatarPlaceholder}>
+              <FontAwesome5 name="dog" size={24} color="#8B5CF6" />
             </View>
           )}
-          
-          {item.notes && (
-            <Text style={styles.notesText}>{item.notes}</Text>
-          )}
-        </View>
-        <View>
-          <FontAwesome5 name="chevron-right" size={16} color="#9CA3AF" />
         </View>
       </TouchableOpacity>
     );
@@ -466,6 +423,107 @@ const ActivitiesScreen = () => {
     </View>
   );
 
+  // Calculate activity stats for summary section based on current filters
+  const calculateTodayStats = () => {
+    // Return empty stats if no activities
+    if (!filteredActivities || filteredActivities.length === 0) {
+      return {
+        peeCount: 0,
+        poopCount: 0,
+        walkCount: 0,
+        totalDistance: 0
+      };
+    }
+    
+    // Filter activities that occurred today based on start_time
+    const todayActivities = filteredActivities.filter(activity => {
+      if (!activity.start_time) return false;
+      return isToday(parseISO(activity.start_time));
+    });
+    
+    // Initialize counters
+    let peeCount = 0;
+    let poopCount = 0;
+    let walkCount = 0;
+    let totalDistance = 0;
+    
+    // Calculate counts and total distance
+    todayActivities.forEach(activity => {
+      const activityType = activity.activity_type?.toLowerCase();
+      
+      if (activityType === 'pee') {
+        peeCount++;
+      } else if (activityType === 'poop') {
+        poopCount++;
+      } else if (activityType === 'walk') {
+        walkCount++;
+        
+        // Add to total distance (convert from meters to km)
+        if (activity.distance_meters) {
+          totalDistance += parseFloat(activity.distance_meters) / 1000;
+        } else if (activity.duration_minutes) {
+          // Estimate distance based on 3.5 km/h walking speed if distance not available
+          totalDistance += (parseFloat(activity.duration_minutes) / 60) * 3.5;
+        }
+      }
+    });
+    
+    return {
+      peeCount,
+      poopCount,
+      walkCount,
+      totalDistance: parseFloat(totalDistance.toFixed(1)) // Round to 1 decimal place
+    };
+  };
+  
+  // Render the daily summary stats section
+  const renderSummaryStats = () => {
+    const stats = calculateTodayStats();
+    
+    return (
+      <View style={styles.summaryContainer}>
+        <Text style={styles.summaryTitle}>Today's Activity</Text>
+        <View style={styles.statsRowContainer}>
+          {/* Pee Count */}
+          <View style={styles.statCompactCard}>
+            <View style={[styles.statCompactIconContainer, { backgroundColor: '#FBBF2420' }]}>
+              <FontAwesome5 name="tint" size={16} color="#FBBF24" />
+            </View>
+            <Text style={styles.statCompactCount}>{stats.peeCount}</Text>
+            <Text style={styles.statCompactLabel}>Pee</Text>
+          </View>
+          
+          {/* Poop Count */}
+          <View style={styles.statCompactCard}>
+            <View style={[styles.statCompactIconContainer, { backgroundColor: '#92400E20' }]}>
+              <FontAwesome5 name="poop" size={16} color="#92400E" />
+            </View>
+            <Text style={styles.statCompactCount}>{stats.poopCount}</Text>
+            <Text style={styles.statCompactLabel}>Poop</Text>
+          </View>
+          
+          {/* Walk Count */}
+          <View style={styles.statCompactCard}>
+            <View style={[styles.statCompactIconContainer, { backgroundColor: '#3B82F620' }]}>
+              <FontAwesome5 name="walking" size={16} color="#3B82F6" />
+            </View>
+            <Text style={styles.statCompactCount}>{stats.walkCount}</Text>
+            <Text style={styles.statCompactLabel}>Walks</Text>
+          </View>
+          
+          {/* Distance */}
+          <View style={styles.statCompactCard}>
+            <View style={[styles.statCompactIconContainer, { backgroundColor: '#3B82F620' }]}>
+              <FontAwesome5 name="map-marked-alt" size={16} color="#3B82F6" />
+            </View>
+            <Text style={styles.statCompactCount}>{stats.totalDistance}</Text>
+            <Text style={styles.statCompactLabel}>Km</Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -483,16 +541,24 @@ const ActivitiesScreen = () => {
 
       {renderFiltersSection()}
 
+      {renderSummaryStats()}
+
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#8B5CF6" />
           <Text style={styles.loadingText}>Loading activities...</Text>
         </View>
       ) : (
-        <FlatList
-          data={filteredActivities || []}
+        <SectionList
+          sections={groupActivitiesByDate(filteredActivities)}
           keyExtractor={(item) => (item && item.id ? item.id.toString() : Math.random().toString())}
           renderItem={renderActivityItem}
+          renderSectionHeader={({ section: { title } }) => (
+            <View style={styles.dateHeaderContainer}>
+              <Text style={styles.dateHeaderText}>{title}</Text>
+              <View style={styles.dateHeaderLine} />
+            </View>
+          )}
           ListEmptyComponent={renderEmptyList}
           ListFooterComponent={() => (
             <View style={{ height: 80 }} />
@@ -506,6 +572,7 @@ const ActivitiesScreen = () => {
               tintColor="#8B5CF6"
             />
           }
+          stickySectionHeadersEnabled={false}
         />
       )}
 
@@ -740,13 +807,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   listContent: {
-    padding: 16,
+    paddingTop: 8,
+    paddingHorizontal: 16,
   },
   activityCard: {
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    padding: 12,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     shadowColor: '#000',
@@ -755,7 +823,12 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  activityIcon: {
+  activityCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  activityIconContainer: {
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -770,35 +843,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   activityTime: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  notes: {
+    fontSize: 14,
+    color: '#6B7280',
     marginBottom: 4,
   },
-  walkStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  statIcon: {
-    marginRight: 4,
-  },
-  statText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  notesText: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 6,
-    fontStyle: 'italic',
+  chevronContainer: {
+    marginLeft: 'auto',
   },
   loadingContainer: {
     flex: 1,
@@ -871,17 +928,130 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
-  dogNameContainer: {
+  walkStats: {
     flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  statIcon: {
+    marginRight: 4,
+  },
+  statText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  dogAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3E8FF',
+  },
+  dogActivityInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginLeft: 12,
+  },
+  dogTextContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    marginRight: 8,
+  },
+  activityDogName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  notesIndicator: {
+    marginLeft: 4,
+    marginTop: 2,
+  },
+  dogActivityAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F3E8FF',
+  },
+  dogActivityAvatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dateHeaderContainer: {
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#F9FAFB',
+    marginBottom: 4,
+  },
+  dateHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4B5563',
+    marginBottom: 8,
+  },
+  dateHeaderLine: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    width: '100%',
+  },
+  summaryContainer: {
+    backgroundColor: 'white',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4B5563',
+    marginBottom: 10,
+  },
+  statsRowContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  statCompactCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 8,
+    width: '23%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  statCompactIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 4,
   },
-  dogIcon: {
-    marginRight: 4,
+  statCompactCount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1F2937',
   },
-  dogName: {
-    fontSize: 14,
+  statCompactLabel: {
+    fontSize: 11,
     color: '#6B7280',
+    marginTop: 2,
   },
 });
 

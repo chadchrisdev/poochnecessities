@@ -2,14 +2,14 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
-import ActivityLogScreen from '../screens/ActivityLogScreen';
 import ActivitiesScreen from '../screens/ActivitiesScreen';
 import DogProfileScreen from '../screens/DogProfileScreen';
+import DogDetailsScreen from '../screens/DogDetailsScreen';
 import LogActivityScreen from '../screens/LogActivityScreen';
 import AddWalkScreen from '../screens/AddWalkScreen';
 import WalkHistoryScreen from '../screens/WalkHistoryScreen';
@@ -20,6 +20,25 @@ import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
 import CreateAccountScreen from '../screens/CreateAccountScreen';
+import ActivityDetailScreen from '../screens/ActivityDetailScreen';
+import EditActivityScreen from '../screens/EditActivityScreen';
+
+// Import activity-specific detail and edit screens
+import WalkDetailScreen from '../screens/WalkDetailScreen';
+import FeedingDetailScreen from '../screens/FeedingDetailScreen';
+import MedicationDetailScreen from '../screens/MedicationDetailScreen';
+import SimpleDetailScreen from '../screens/SimpleDetailScreen';
+
+import EditWalkScreen from '../screens/EditWalkScreen';
+import EditFeedingScreen from '../screens/EditFeedingScreen';
+import EditMedicationScreen from '../screens/EditMedicationScreen';
+import SimpleEditScreen from '../screens/SimpleEditScreen';
+
+// Import activity selection and creation screens
+import AddActivityScreen from '../screens/AddActivityScreen';
+import AddSimpleActivityScreen from '../screens/AddSimpleActivityScreen';
+import AddMedicationScreen from '../screens/AddMedicationScreen';
+import AddFeedingScreen from '../screens/AddFeedingScreen';
 
 // Import onboarding navigator
 import OnboardingNavigator from './OnboardingNavigator';
@@ -30,7 +49,7 @@ import { AuthProvider, useAuth } from '../src/context/AuthContext';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// Main app screens accessible via bottom tabs
+// Main Tab Navigator with Add Button in the tabbar
 const MainTabNavigator = () => {
   return (
     <Tab.Navigator
@@ -75,6 +94,20 @@ const MainTabNavigator = () => {
           ),
           tabBarIcon: ({ color, size }) => (
             <FontAwesome5 name="calendar-alt" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen 
+        name="AddTab" 
+        component={AddActivityScreen}
+        options={{
+          tabBarLabel: () => null,
+          tabBarIcon: () => (
+            <View style={styles.addButtonContainer}>
+              <View style={styles.addButton}>
+                <FontAwesome5 name="plus" size={22} color="white" />
+              </View>
+            </View>
           ),
         }}
       />
@@ -145,14 +178,36 @@ const AppStack = () => {
       <Stack.Screen name="OnboardingAddress" component={OnboardingNavigator} initialParams={{ screen: 'OnboardingAddress' }} />
       <Stack.Screen name="OnboardingComplete" component={OnboardingNavigator} initialParams={{ screen: 'OnboardingComplete' }} />
       
-      {/* App screens */}
+      {/* Main app with tab navigator */}
       <Stack.Screen name="Main" component={MainTabNavigator} />
+      
+      {/* App screens */}
       <Stack.Screen name="LogActivity" component={LogActivityScreen} />
       <Stack.Screen name="AddWalk" component={AddWalkScreen} />
       <Stack.Screen name="WalkHistory" component={WalkHistoryScreen} />
       <Stack.Screen name="AddDog" component={AddDogScreen} />
       <Stack.Screen name="EditDog" component={EditDogScreen} />
+      <Stack.Screen name="DogDetails" component={DogDetailsScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="ActivityDetail" component={ActivityDetailScreen} />
+      <Stack.Screen name="EditActivity" component={EditActivityScreen} />
+      
+      {/* Activity-specific detail screens */}
+      <Stack.Screen name="WalkDetail" component={WalkDetailScreen} />
+      <Stack.Screen name="FeedingDetail" component={FeedingDetailScreen} />
+      <Stack.Screen name="MedicationDetail" component={MedicationDetailScreen} />
+      <Stack.Screen name="SimpleDetail" component={SimpleDetailScreen} />
+      
+      {/* Activity-specific edit screens */}
+      <Stack.Screen name="EditWalk" component={EditWalkScreen} />
+      <Stack.Screen name="EditFeeding" component={EditFeedingScreen} />
+      <Stack.Screen name="EditMedication" component={EditMedicationScreen} />
+      <Stack.Screen name="SimpleEdit" component={SimpleEditScreen} />
+      
+      {/* Activity creation screens */}
+      <Stack.Screen name="AddSimpleActivity" component={AddSimpleActivityScreen} />
+      <Stack.Screen name="AddMedication" component={AddMedicationScreen} />
+      <Stack.Screen name="AddFeeding" component={AddFeedingScreen} />
     </Stack.Navigator>
   );
 };
@@ -190,6 +245,26 @@ const styles = StyleSheet.create({
   subText: {
     fontSize: 16,
     color: '#6B7280',
+  },
+  addButtonContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    top: -5,
+  },
+  addButton: {
+    backgroundColor: '#8B5CF6',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
 });
 

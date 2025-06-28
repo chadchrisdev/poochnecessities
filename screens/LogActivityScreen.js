@@ -15,6 +15,8 @@ import {
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { supabase } from '../src/lib/supabase';
+import ActivityIcon from '../src/components/ActivityIcon';
+import { getActivityIcon, getActivityTitle } from '../constants/activityIcons';
 
 const LogActivityScreen = () => {
   const route = useRoute();
@@ -60,18 +62,15 @@ const LogActivityScreen = () => {
     fetchDogs();
   }, []);
 
-  // Activity type icons mapping
-  const getActivityIcon = () => {
-    switch(activityType) {
-      case 'Walk':
-        return <FontAwesome5 name="map-marker-alt" size={24} color="#8B5CF6" />;
-      case 'Pee':
-        return <FontAwesome5 name="tint" size={24} color="#FBBF24" />;
-      case 'Poop':
-        return <Text style={styles.emojiIcon}>💩</Text>;
-      default:
-        return <FontAwesome5 name="paw" size={24} color="#8B5CF6" />;
-    }
+  // Activity type icons mapping - use our ActivityIcon component
+  const renderActivityIcon = () => {
+    const { component: IconComponent, name, color, bgColor } = getActivityIcon(activityType.toLowerCase());
+    
+    return (
+      <View style={[styles.activityIconContainer, { backgroundColor: bgColor }]}>
+        <IconComponent name={name} size={24} color={color} />
+      </View>
+    );
   };
 
   // Handle saving activity to Supabase
@@ -107,7 +106,7 @@ const LogActivityScreen = () => {
         [
           { 
             text: "OK", 
-            onPress: () => navigation.navigate('HomeTab') 
+            onPress: () => navigation.navigate('Main') 
           }
         ]
       );
@@ -123,19 +122,20 @@ const LogActivityScreen = () => {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <FontAwesome5 name="arrow-left" size={20} color="#4B5563" />
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <FontAwesome5 name="arrow-left" size={20} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Log {activityType}</Text>
-        <View style={{ width: 20 }} />
+      </View>
+
+      <View style={styles.iconContainer}>
+        {renderActivityIcon()}
       </View>
 
       <View style={styles.content}>
         {/* Activity Type Section */}
         <View style={styles.activityTypeSection}>
-          <View style={styles.activityIconContainer}>
-            {getActivityIcon()}
-          </View>
+          {renderActivityIcon()}
           <Text style={styles.activityTypeText}>{activityType}</Text>
         </View>
 
@@ -302,18 +302,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   activityIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F9FAFB',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
   },
   activityTypeText: {
     fontSize: 22,
@@ -482,6 +476,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 16,
     borderRadius: 8,
+  },
+  iconContainerOverride: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+    backgroundColor: '#F9FAFB',
   },
 });
 

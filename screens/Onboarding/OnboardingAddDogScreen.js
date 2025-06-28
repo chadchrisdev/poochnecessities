@@ -663,17 +663,20 @@ const OnboardingAddDogScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity 
-                style={[styles.saveButton, (!dogName.trim() || !breed.trim()) && styles.saveButtonDisabled]}
-                onPress={saveDog}
-                disabled={!dogName.trim() || !breed.trim() || loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save Dog</Text>
-                )}
-              </TouchableOpacity>
+              {/* Only show the Save Dog button here when dogs have been added */}
+              {dogsAdded.length > 0 && (
+                <TouchableOpacity 
+                  style={[styles.saveButton, (!dogName.trim() || !breed.trim()) && styles.saveButtonDisabled]}
+                  onPress={saveDog}
+                  disabled={!dogName.trim() || !breed.trim() || loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>Save Dog</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </>
           )}
           

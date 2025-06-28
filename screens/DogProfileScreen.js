@@ -222,7 +222,7 @@ const DogProfileScreen = () => {
               <TouchableOpacity 
                 key={dog.id} 
                 style={styles.dogCard}
-                onPress={() => navigation.navigate('EditDog', { dog })}
+                onPress={() => navigation.navigate('DogDetails', { dog })}
               >
                 {renderDogImage(dog)}
                 <View style={styles.dogInfo}>

@@ -13,7 +13,8 @@ import {
   Dimensions,
   Animated,
   Modal,
-  FlatList
+  FlatList,
+  Image
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { FontAwesome5 } from '@expo/vector-icons';
@@ -71,6 +72,7 @@ const AddWalkScreen = () => {
   // Add state for dog selection
   const [dogs, setDogs] = useState([]);
   const [selectedDog, setSelectedDog] = useState(null);
+  const [selectedDogs, setSelectedDogs] = useState([]);
   const [dogsLoading, setDogsLoading] = useState(true);
   const [dogModalVisible, setDogModalVisible] = useState(false);
   
@@ -249,16 +251,51 @@ const AddWalkScreen = () => {
 
   // Handle starting a walk
   const handleStartWalk = () => {
-    const now = new Date();
-    setStartTime(now);
+    if (selectedDogs.length === 0) {
+      Alert.alert('Error', 'Please select at least one dog for this walk');
+      return;
+    }
+    
+    if (locationPermission !== 'granted') {
+      Alert.alert(
+        'Location Required', 
+        'Location permission is needed to track your walk. Please enable location in your device settings.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    // Set the start time to current time
+    setStartTime(new Date());
+    
+    // Start walk mode
     setIsWalking(true);
+    
+    // Start tracking location
+    startLocationTracking();
   };
   
   // Handle stopping a walk
   const handleStopWalk = () => {
-    const now = new Date();
-    setEndTime(now);
-    setIsWalking(false);
+    // Confirm with user before stopping the walk
+    Alert.alert(
+      "Stop Walk",
+      "Are you sure you want to stop this walk?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Stop Walk",
+          onPress: () => {
+            const now = new Date();
+            setEndTime(now);
+            setIsWalking(false);
+          }
+        }
+      ]
+    );
   };
 
   // Handle time change for the DateTimePicker
@@ -330,7 +367,7 @@ const AddWalkScreen = () => {
       setDogsLoading(true);
       const { data, error } = await supabase
         .from('dogs')
-        .select('id, name')
+        .select('id, name, photo_url')
         .order('name');
 
       if (error) {
@@ -340,6 +377,15 @@ const AddWalkScreen = () => {
       }
 
       setDogs(data || []);
+      
+      // If there's only one dog, auto-select it
+      if (data && data.length === 1) {
+        setSelectedDog(data[0]);
+        setSelectedDogs([data[0]]);
+      } else if (data && data.length > 0) {
+        // By default, select all dogs when multiple are available
+        setSelectedDogs([...data]);
+      }
     } catch (error) {
       console.error('Unexpected error fetching dogs:', error);
       Alert.alert('Error', 'Something went wrong while loading dogs');
@@ -353,10 +399,10 @@ const AddWalkScreen = () => {
     fetchDogs();
   }, []);
 
-  // Modified save function to include selected dog
+  // Modified save function to include selected dogs
   const handleSaveWalk = async () => {
-    if (!selectedDog) {
-      Alert.alert('Error', 'Please select a dog for this walk');
+    if (selectedDogs.length === 0) {
+      Alert.alert('Error', 'Please select at least one dog for this walk');
       return;
     }
 
@@ -364,28 +410,41 @@ const AddWalkScreen = () => {
       // Show loading indicator
       setIsSaving(true);
       
-      const { data, error } = await supabase
-        .from('activities')
-        .insert([
-          {
-            activity_type: 'walk',
-            start_time: startTime.toISOString(),
-            end_time: endTime ? endTime.toISOString() : null,
-            duration_minutes: duration, 
-            distance_meters: distance, 
-            notes: notes,
-            dog_id: selectedDog.id,
-            dog_name: selectedDog.name
-          }
-        ]);
-
-      if (error) {
-        console.error('Error saving walk:', error.message);
-        Alert.alert('Error', 'There was a problem saving your walk.');
+      // Base activity data without dog-specific fields
+      const baseActivityData = {
+        activity_type: 'walk',
+        start_time: startTime.toISOString(),
+        end_time: endTime ? endTime.toISOString() : null,
+        duration_minutes: duration, 
+        distance_meters: distance, 
+        notes: notes,
+      };
+      
+      // Create one activity per selected dog
+      const activityPromises = selectedDogs.map(dog => {
+        const dogActivityData = {
+          ...baseActivityData,
+          dog_id: dog.id,
+        };
+        
+        return supabase
+          .from('activities')
+          .insert([dogActivityData]);
+      });
+      
+      // Execute all insertions in parallel
+      const results = await Promise.all(activityPromises);
+      
+      // Check for any errors
+      const errors = results.filter(result => result.error);
+      
+      if (errors.length > 0) {
+        console.error('Errors saving walk:', errors);
+        Alert.alert('Error', 'There was a problem saving your walk for some dogs.');
       } else {
-        console.log('Walk saved to activities:', data);
+        console.log('Walk saved to activities for all selected dogs');
         Alert.alert('Success', 'Walk saved successfully!', [
-          { text: "OK", onPress: () => navigation.navigate('HomeTab') }
+          { text: "OK", onPress: () => navigation.navigate('Main') }
         ]);
       }
     } catch (e) {
@@ -526,48 +585,6 @@ const AddWalkScreen = () => {
           </Animated.View>
         </TouchableOpacity>
 
-        {/* Dog Selection - Before starting walk */}
-        {!isWalking && !endTime && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Select Dog</Text>
-            {dogsLoading ? (
-              <View style={styles.loadingDogs}>
-                <ActivityIndicator size="small" color="#8B5CF6" />
-                <Text style={styles.loadingText}>Loading dogs...</Text>
-              </View>
-            ) : dogs.length === 0 ? (
-              <View style={styles.noDogs}>
-                <Text style={styles.noDogsText}>No dogs found</Text>
-                <TouchableOpacity 
-                  style={styles.addDogButton}
-                  onPress={() => navigation.navigate('AddDog')}
-                >
-                  <Text style={styles.addDogButtonText}>Add a Dog</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.dogSelector}
-                onPress={() => setDogModalVisible(true)}
-              >
-                {selectedDog ? (
-                  <View style={styles.selectedDogContainer}>
-                    <View style={styles.dogIconContainer}>
-                      <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
-                    </View>
-                    <Text style={styles.selectedDogText}>{selectedDog.name}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.selectDogPlaceholder}>
-                    <Text style={styles.selectDogText}>Select a dog</Text>
-                    <FontAwesome5 name="chevron-down" size={16} color="#6B7280" />
-                  </View>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
         {/* Target Distance Setting (only shown before starting) */}
         {!isWalking && !endTime && (
           <View style={styles.targetDistanceSection}>
@@ -609,44 +626,86 @@ const AddWalkScreen = () => {
           </View>
         )}
         
+        {/* Dog Selection Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Dog Selection</Text>
+          
+          {dogsLoading ? (
+            <View style={styles.loadingDogs}>
+              <ActivityIndicator size="small" color="#8B5CF6" />
+              <Text style={styles.loadingText}>Loading dogs...</Text>
+            </View>
+          ) : dogs.length === 0 ? (
+            <View style={styles.noDogs}>
+              <Text style={styles.noDogsText}>No dogs found</Text>
+              <TouchableOpacity 
+                style={styles.addDogButton}
+                onPress={() => navigation.navigate('AddDog')}
+              >
+                <Text style={styles.addDogButtonText}>Add a Dog</Text>
+              </TouchableOpacity>
+            </View>
+          ) : dogs.length === 1 ? (
+            <View style={styles.singleDogContainer}>
+              <View style={styles.dogAvatarContainer}>
+                {dogs[0].photo_url ? (
+                  <Image 
+                    source={{ uri: dogs[0].photo_url }} 
+                    style={styles.dogAvatar} 
+                  />
+                ) : (
+                  <View style={styles.dogAvatarPlaceholder}>
+                    <FontAwesome5 name="dog" size={24} color="#8B5CF6" />
+                  </View>
+                )}
+              </View>
+              <Text style={styles.walkingDogText}>Walking {dogs[0].name}</Text>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.selectDogsButton}
+              onPress={() => setDogModalVisible(true)}
+            >
+              <FontAwesome5 name="paw" size={18} color="#8B5CF6" style={styles.buttonIcon} />
+              <Text style={styles.selectDogsText}>
+                {selectedDogs.length === dogs.length 
+                  ? 'All Dogs Selected' 
+                  : `${selectedDogs.length} ${selectedDogs.length === 1 ? 'Dog' : 'Dogs'} Selected`}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        
         {/* Walk Controls */}
-        <View style={styles.walkControls}>
-          {!isWalking && !endTime ? (
+        <View style={styles.walkControlsContainer}>
+          {/* Start and Stop buttons in row */}
+          <View style={styles.walkButtonsRow}>
             <TouchableOpacity 
               style={[
+                styles.walkButton,
                 styles.startButton, 
-                (!selectedDog && dogs.length > 0) && styles.disabledButton
+                startTime ? styles.disabledButton : { backgroundColor: '#10B981' } // Green when not started, grey when started
               ]}
               onPress={handleStartWalk}
-              disabled={!selectedDog && dogs.length > 0}
+              disabled={startTime !== null}
             >
               <FontAwesome5 name="play" size={16} color="white" style={styles.buttonIcon} />
               <Text style={styles.buttonText}>Start Walk</Text>
             </TouchableOpacity>
-          ) : isWalking ? (
+            
             <TouchableOpacity 
-              style={styles.stopButton}
+              style={[
+                styles.walkButton,
+                styles.stopButton, 
+                (!startTime || endTime) ? styles.disabledButton : { backgroundColor: '#EF4444' } // Red when walk in progress, grey otherwise
+              ]}
               onPress={handleStopWalk}
+              disabled={!startTime || endTime !== null}
             >
               <FontAwesome5 name="stop" size={16} color="white" style={styles.buttonIcon} />
               <Text style={styles.buttonText}>Stop Walk</Text>
             </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              style={styles.saveButton}
-              onPress={handleSaveWalk}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <>
-                  <FontAwesome5 name="save" size={16} color="white" style={styles.buttonIcon} />
-                  <Text style={styles.buttonText}>Save Walk</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
+          </View>
         </View>
         
         {/* Walk Stats */}
@@ -809,6 +868,25 @@ const AddWalkScreen = () => {
             numberOfLines={4}
           />
         </View>
+        
+        {/* Save Walk Button - Placed at bottom after notes */}
+        <TouchableOpacity 
+          style={[
+            styles.saveWalkButton,
+            selectedDogs.length === 0 && styles.disabledButton
+          ]}
+          onPress={handleSaveWalk}
+          disabled={isSaving || selectedDogs.length === 0}
+        >
+          {isSaving ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <>
+              <FontAwesome5 name="save" size={16} color="white" style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Save Walk</Text>
+            </>
+          )}
+        </TouchableOpacity>
 
         {/* Extra space at bottom to ensure content isn't hidden by footer */}
         <View style={{ height: 80 }} />
@@ -824,13 +902,38 @@ const AddWalkScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select a Dog</Text>
+              <Text style={styles.modalTitle}>Select Dogs for Walk</Text>
               <TouchableOpacity 
                 onPress={() => setDogModalVisible(false)}
               >
                 <FontAwesome5 name="times" size={20} color="#4B5563" />
               </TouchableOpacity>
             </View>
+            
+            {/* Select All Option */}
+            <TouchableOpacity 
+              style={styles.selectAllContainer}
+              onPress={() => {
+                // If all are already selected, unselect all, else select all
+                if (selectedDogs.length === dogs.length) {
+                  setSelectedDogs([]);
+                } else {
+                  setSelectedDogs([...dogs]);
+                }
+              }}
+            >
+              <View style={styles.checkboxContainer}>
+                <View style={[
+                  styles.checkbox, 
+                  selectedDogs.length === dogs.length && styles.checkboxSelected
+                ]}>
+                  {selectedDogs.length === dogs.length && (
+                    <FontAwesome5 name="check" size={12} color="white" />
+                  )}
+                </View>
+              </View>
+              <Text style={styles.selectAllText}>All Dogs</Text>
+            </TouchableOpacity>
             
             <FlatList
               data={dogs}
@@ -839,14 +942,50 @@ const AddWalkScreen = () => {
                 <TouchableOpacity 
                   style={styles.dogItem}
                   onPress={() => {
-                    setSelectedDog(item);
-                    setDogModalVisible(false);
+                    // Toggle selection
+                    const isCurrentlySelected = selectedDogs.some(dog => dog.id === item.id);
+                    
+                    if (isCurrentlySelected) {
+                      // Remove from selection
+                      setSelectedDogs(selectedDogs.filter(dog => dog.id !== item.id));
+                    } else {
+                      // Add to selection
+                      setSelectedDogs([...selectedDogs, item]);
+                    }
                   }}
                 >
-                  <View style={styles.dogIconContainer}>
-                    <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                  <View style={styles.dogSelectionRow}>
+                    <View style={styles.dogProfile}>
+                      {/* Dog Avatar */}
+                      <View style={styles.dogAvatarContainer}>
+                        {item.photo_url ? (
+                          <Image 
+                            source={{ uri: item.photo_url }} 
+                            style={styles.dogAvatar} 
+                          />
+                        ) : (
+                          <View style={styles.dogAvatarPlaceholder}>
+                            <FontAwesome5 name="dog" size={18} color="#8B5CF6" />
+                          </View>
+                        )}
+                      </View>
+                      
+                      {/* Dog Name */}
+                      <Text style={styles.dogItemText}>{item.name}</Text>
+                    </View>
+                    
+                    {/* Checkbox */}
+                    <View style={styles.checkboxContainer}>
+                      <View style={[
+                        styles.checkbox, 
+                        selectedDogs.some(dog => dog.id === item.id) && styles.checkboxSelected
+                      ]}>
+                        {selectedDogs.some(dog => dog.id === item.id) && (
+                          <FontAwesome5 name="check" size={12} color="white" />
+                        )}
+                      </View>
+                    </View>
                   </View>
-                  <Text style={styles.dogItemText}>{item.name}</Text>
                 </TouchableOpacity>
               )}
               ListEmptyComponent={
@@ -855,14 +994,24 @@ const AddWalkScreen = () => {
             />
             
             <TouchableOpacity 
-              style={styles.addDogButtonInModal}
+              style={[
+                styles.doneButton,
+                selectedDogs.length === 0 && styles.disabledButton
+              ]}
               onPress={() => {
-                setDogModalVisible(false);
-                navigation.navigate('AddDog');
+                if (selectedDogs.length > 0) {
+                  // If only one dog selected, also update selectedDog for backwards compatibility
+                  if (selectedDogs.length === 1) {
+                    setSelectedDog(selectedDogs[0]);
+                  }
+                  setDogModalVisible(false);
+                } else {
+                  Alert.alert("Error", "Please select at least one dog");
+                }
               }}
+              disabled={selectedDogs.length === 0}
             >
-              <FontAwesome5 name="plus" size={16} color="white" style={{ marginRight: 8 }} />
-              <Text style={styles.addDogButtonText}>Add New Dog</Text>
+              <Text style={styles.doneButtonText}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1131,14 +1280,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
   },
-  walkControls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  walkControlsContainer: {
     marginBottom: 20,
   },
-  startButton: {
-    backgroundColor: '#10B981', // Green
-    width: '100%',
+  walkButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  walkButton: {
+    flex: 1,
     paddingVertical: 16,
     borderRadius: 8,
     flexDirection: 'row',
@@ -1149,22 +1300,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
+  },
+  startButton: {
+    marginRight: 8,
   },
   stopButton: {
-    backgroundColor: '#EF4444', // Red
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    marginLeft: 8,
   },
-  saveButton: {
+  saveWalkButton: {
     backgroundColor: '#8B5CF6',
     width: '100%',
     paddingVertical: 16,
@@ -1177,6 +1320,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
+    marginTop: 8,
   },
   buttonIcon: {
     marginRight: 8,
@@ -1341,8 +1485,6 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   dogItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
@@ -1351,18 +1493,107 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1F2937',
   },
-  addDogButtonInModal: {
+  selectAllContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    padding: 12,
+  },
+  checkboxContainer: {
+    width: 24,
+    height: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 4,
+    marginRight: 12,
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 2,
+    backgroundColor: 'white',
+  },
+  checkboxSelected: {
     backgroundColor: '#8B5CF6',
-    paddingVertical: 12,
-    marginTop: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllText: {
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  dogSelectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dogProfile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  dogAvatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  dogAvatar: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  dogAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  walkingDogText: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  selectDogsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     borderRadius: 8,
+    padding: 14,
+  },
+  selectDogsText: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  doneButton: {
+    backgroundColor: '#8B5CF6',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  doneButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
   disabledButton: {
-    backgroundColor: '#C4B5FD', // Light purple
-    opacity: 0.7,
+    backgroundColor: '#D1D5DB',
+    opacity: 0.8,
+  },
+  singleDogContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });
 

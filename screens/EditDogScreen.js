@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { format } from 'date-fns';
 import BreedSelector from '../src/components/BreedSelector';
+import WeightTracking from '../src/components/WeightTracking';
 
 const EditDogScreen = () => {
   const navigation = useNavigation();
@@ -330,6 +331,8 @@ const EditDogScreen = () => {
               </Text>
             </TouchableOpacity>
           </View>
+
+          <WeightTracking dogId={dog.id} />
 
           <TouchableOpacity 
             style={[styles.saveButton, (!dogName.trim() || !breed.trim()) && styles.saveButtonDisabled]}

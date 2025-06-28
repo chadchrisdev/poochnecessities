@@ -16,7 +16,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../src/lib/supabase';
 import { useAuth } from '../src/context/AuthContext';
 import UserAvatar from '../src/components/UserAvatar';
-import { format } from 'date-fns';
+import ActivityIcon from '../src/components/ActivityIcon';
+import { format, parseISO, isToday } from 'date-fns';
+import { getActivityIcon, getActivityTitle } from '../constants/activityIcons';
+import { navigateToActivityDetail } from '../src/utils/activityNavigationHelper';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
@@ -174,28 +177,6 @@ const HomeScreen = () => {
     }
   };
   
-  // Get the appropriate emoji and background color for activity type
-  const getActivityIconInfo = (activityType) => {
-    switch(activityType?.toLowerCase()) {
-      case 'walk':
-        return { emoji: '🐾', bgColor: '#F3E8FF' };
-      case 'feeding':
-      case 'feed':
-        return { emoji: '🍽️', bgColor: '#DBEAFE' };
-      case 'play':
-        return { emoji: '🎾', bgColor: '#D1FAE5' };
-      case 'pee':
-        return { emoji: '💧', bgColor: '#FEF3C7' };
-      case 'poop':
-        return { emoji: '💩', bgColor: '#FEE2E2' };
-      case 'medication':
-      case 'meds':
-        return { emoji: '💊', bgColor: '#FCE7F3' };
-      default:
-        return { emoji: '🐶', bgColor: '#F3F4F6' };
-    }
-  };
-  
   // Get a readable title for the activity
   const getActivityTitle = (activity) => {
     const type = activity.activity_type?.toLowerCase();
@@ -209,9 +190,9 @@ const HomeScreen = () => {
       case 'play':
         return 'Play Time';
       case 'pee':
-        return 'Potty Break (Pee)';
+        return 'Pee';
       case 'poop':
-        return 'Potty Break (Poop)';
+        return 'Poop';
       case 'medication':
       case 'meds':
         return 'Medication';
@@ -219,6 +200,28 @@ const HomeScreen = () => {
         // Capitalize the first letter
         return type ? type.charAt(0).toUpperCase() + type.slice(1) : 'Activity';
     }
+  };
+  
+  // Render activity icon with proper styling
+  const renderActivityIcon = (activityType) => {
+    const { component: IconComponent, name, color, bgColor } = getActivityIcon(activityType);
+    
+    return (
+      <View style={[styles.activityIconContainer, { backgroundColor: bgColor }]}>
+        <IconComponent name={name} size={24} color={color} />
+      </View>
+    );
+  };
+  
+  // Render tile icon (simplified version for quick access tiles)
+  const renderTileIcon = (activityType) => {
+    const { component: IconComponent, name, color, bgColor } = getActivityIcon(activityType);
+    
+    return (
+      <View style={[styles.tileIconContainer, { backgroundColor: bgColor }]}>
+        <IconComponent name={name} size={24} color={color} />
+      </View>
+    );
   };
 
   return (
@@ -271,9 +274,7 @@ const HomeScreen = () => {
                 style={styles.quickAccessTile}
                 onPress={() => navigation.navigate('AddWalk')}
               >
-                <View style={styles.tileIconContainer}>
-                  <FontAwesome5 name="map-marker-alt" size={24} color="#8B5CF6" />
-                </View>
+                {renderTileIcon('walk')}
                 <Text style={styles.tileText}>Walk</Text>
               </TouchableOpacity>
               
@@ -282,9 +283,7 @@ const HomeScreen = () => {
                 style={styles.quickAccessTile}
                 onPress={() => navigation.navigate('LogActivity', { activityType: 'Pee' })}
               >
-                <View style={styles.tileIconContainer}>
-                  <FontAwesome5 name="tint" size={24} color="#FBBF24" />
-                </View>
+                {renderTileIcon('pee')}
                 <Text style={styles.tileText}>Pee</Text>
               </TouchableOpacity>
               
@@ -293,9 +292,7 @@ const HomeScreen = () => {
                 style={styles.quickAccessTile}
                 onPress={() => navigation.navigate('LogActivity', { activityType: 'Poop' })}
               >
-                <View style={styles.tileIconContainer}>
-                  <Text style={styles.emojiIcon}>💩</Text>
-                </View>
+                {renderTileIcon('poop')}
                 <Text style={styles.tileText}>Poop</Text>
               </TouchableOpacity>
             </View>
@@ -309,7 +306,7 @@ const HomeScreen = () => {
                 style={styles.primaryButton}
                 onPress={() => navigation.navigate('ActivitiesTab')}
               >
-                <Text style={styles.buttonText}>Log Activity</Text>
+                <Text style={styles.buttonText}>All Activities</Text>
               </TouchableOpacity>
             </View>
             
@@ -332,24 +329,46 @@ const HomeScreen = () => {
                 </View>
               ) : (
                 activities.map((activity, index) => {
-                  const { emoji, bgColor } = getActivityIconInfo(activity.activity_type);
                   return (
                     <TouchableOpacity 
                       key={activity.id || index} 
                       style={styles.activityCard}
-                      onPress={() => navigation.navigate('ActivityDetails', { activityId: activity.id })}
+                      onPress={() => navigateToActivityDetail(navigation, activity.id, activity.activity_type)}
                     >
-                      <View style={[styles.activityIcon, { backgroundColor: bgColor }]}>
-                        <Text style={styles.activityEmoji}>{emoji}</Text>
-                      </View>
+                      {renderActivityIcon(activity.activity_type)}
+                      
+                      {/* Activity info column */}
                       <View style={styles.activityDetails}>
                         <Text style={styles.activityTitle}>
                           {getActivityTitle(activity)}
-                          {activity.dog_name !== 'Unknown Dog' && ` • ${activity.dog_name}`}
                         </Text>
                         <Text style={styles.activityTime}>
                           {formatActivityTime(activity.start_time, activity.duration_minutes)}
                         </Text>
+                      </View>
+                      
+                      {/* Dog info column with name and avatar */}
+                      <View style={styles.dogActivityInfo}>
+                        <View style={styles.dogTextContainer}>
+                          <Text style={styles.activityDogName}>{activity.dog_name}</Text>
+                          {activity.notes && activity.notes.length > 0 && (
+                            <View style={styles.notesIndicator}>
+                              <FontAwesome5 name="sticky-note" size={12} color="#8B5CF6" />
+                            </View>
+                          )}
+                        </View>
+                        
+                        {/* Dog Avatar */}
+                        {activity.dog_photo ? (
+                          <Image 
+                            source={{ uri: activity.dog_photo }} 
+                            style={styles.dogActivityAvatar} 
+                          />
+                        ) : (
+                          <View style={styles.dogActivityAvatarPlaceholder}>
+                            <FontAwesome5 name="dog" size={24} color="#8B5CF6" />
+                          </View>
+                        )}
                       </View>
                     </TouchableOpacity>
                   );
@@ -417,7 +436,7 @@ const HomeScreen = () => {
                     <TouchableOpacity 
                       key={dog.id} 
                       style={styles.dogCard}
-                      onPress={() => navigation.navigate('DogProfile', { dogId: dog.id })}
+                      onPress={() => navigation.navigate('DogDetails', { dog })}
                     >
                       <View style={styles.dogAvatar}>
                         {dog.photo_url ? (
@@ -554,10 +573,10 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    overflow: 'hidden',
   },
   tileText: {
     fontSize: 14,
@@ -594,16 +613,13 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  activityIcon: {
+  activityIconContainer: {
     width: 50,
     height: 50,
     borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-  },
-  activityEmoji: {
-    fontSize: 24,
   },
   activityDetails: {
     flex: 1,
@@ -612,7 +628,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   activityTime: {
     fontSize: 14,
@@ -741,6 +757,41 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '500',
+  },
+  dogActivityAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F3E8FF',
+  },
+  dogActivityAvatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F3E8FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dogActivityInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginLeft: 12,
+  },
+  activityDogName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginRight: 8,
+    marginBottom: 4,
+  },
+  dogTextContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    marginRight: 8,
+  },
+  notesIndicator: {
+    marginLeft: 4,
+    marginTop: 2,
   },
 });
 
